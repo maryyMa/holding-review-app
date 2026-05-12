@@ -5,6 +5,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
+/** 应用使用的浅色 Material 配色方案。 */
 private val LightColors = lightColorScheme(
     primary = Color(0xFF147C72),
     onPrimary = Color.White,
@@ -20,6 +21,9 @@ private val LightColors = lightColorScheme(
     error = Color(0xFFC93A3A)
 )
 
+/**
+ * 为可组合内容应用持仓复盘的 Material 主题。
+ */
 @Composable
 fun HoldingReviewTheme(content: @Composable () -> Unit) {
     MaterialTheme(

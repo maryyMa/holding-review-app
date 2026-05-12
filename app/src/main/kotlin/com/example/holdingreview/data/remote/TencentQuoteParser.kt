@@ -5,10 +5,17 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
 
+/**
+ * 将腾讯行情响应解析为标准化远程行情模型。
+ */
 @Singleton
 class TencentQuoteParser @Inject constructor() {
+    /** 匹配腾讯 JavaScript 风格响应中的每条行情记录。 */
     private val recordRegex = Regex("""v_[^=]+="([^"]*)"""")
 
+    /**
+     * 解析所有有效行情记录，并跳过格式异常的行。
+     */
     fun parse(raw: String): List<RemoteQuote> {
         return recordRegex.findAll(raw).mapNotNull { match ->
             val fields = match.groupValues[1].split("~")

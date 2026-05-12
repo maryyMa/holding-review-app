@@ -9,3 +9,11 @@ captures/
 .cxx/
 app/build/
 *.hprof
+/stock-monitor-skill/scripts/analyser.py
+/stock-monitor-skill/scripts/control.sh
+/stock-monitor-skill/scripts/monitor.py
+/stock-monitor-skill/scripts/monitor_daemon.py
+/stock-monitor-skill/scripts/test_suite.py
+/stock-monitor-skill/_meta.json
+/stock-monitor-skill/README.md
+/stock-monitor-skill/SKILL.md

@@ -3,9 +3,16 @@ package com.example.holdingreview.data.remote
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
+/**
+ * 腾讯行情响应解析的单元测试。
+ */
 class TencentQuoteParserTest {
+    /** 被测解析器。 */
     private val parser = TencentQuoteParser()
 
+    /**
+     * 验证有效的腾讯行情记录会映射为标准化行情。
+     */
     @Test
     fun `parses tencent quote text`() {
         val raw = """

@@ -5,11 +5,20 @@ import com.example.holdingreview.domain.model.Market
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * 每日复盘生成逻辑的单元测试。
+ */
 class GenerateDailyReviewUseCaseTest {
+    /** 异动分析器和复盘生成器共用的计算器依赖。 */
     private val calculator = CalculatePortfolioUseCase()
+    /** 用于生成复盘输入信号的异动分析器。 */
     private val analyzer = AnalyzeMarketSignalsUseCase(calculator)
+    /** 被测复盘生成器。 */
     private val useCase = GenerateDailyReviewUseCase(calculator)
 
+    /**
+     * 验证生成的草稿包含复盘正文和 AI Prompt。
+     */
     @Test
     fun `generates review and ai prompt`() {
         val holdings = listOf(

@@ -5,9 +5,16 @@ import com.example.holdingreview.domain.model.Market
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
+/**
+ * 组合聚合计算逻辑的单元测试。
+ */
 class CalculatePortfolioUseCaseTest {
+    /** 被测用例。 */
     private val useCase = CalculatePortfolioUseCase()
 
+    /**
+     * 验证总额、盈亏、主要贡献和主要拖累的计算。
+     */
     @Test
     fun `calculates portfolio totals and contributors`() {
         val holdings = listOf(
@@ -25,6 +32,9 @@ class CalculatePortfolioUseCaseTest {
         assertEquals("300750", snapshot.topDrag?.symbol)
     }
 
+    /**
+     * 创建只包含聚合计算所需字段的持仓测试数据。
+     */
     private fun holding(
         symbol: String,
         name: String,

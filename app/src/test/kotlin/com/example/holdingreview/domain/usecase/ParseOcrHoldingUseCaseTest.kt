@@ -4,9 +4,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * OCR 持仓草稿解析的单元测试。
+ */
 class ParseOcrHoldingUseCaseTest {
+    /** 被测解析用例。 */
     private val useCase = ParseOcrHoldingUseCase()
 
+    /**
+     * 验证类似券商截图的文本可以解析出持仓草稿。
+     */
     @Test
     fun `parses holding drafts from broker screenshot text`() {
         val rawText = """
