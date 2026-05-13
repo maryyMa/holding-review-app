@@ -114,7 +114,7 @@ data class WatchStock(
     val tags: String,
     /** 用户首次加入关注列表的时间，单位为 epoch 毫秒。 */
     val watchedAtMillis: Long,
-    /** 加入关注时对应交易日的收盘价；尚未能确认收盘价时为空。 */
+    /** 加入关注时记录的当前价；尚未拿到行情时为空。 */
     val watchBaseClose: Double?,
     /** [watchBaseClose] 对应的 yyyy-MM-dd 交易日。 */
     val watchBaseCloseDate: String?,
@@ -125,7 +125,7 @@ data class WatchStock(
     /** 最近本地更新时间，单位为 epoch 毫秒。 */
     val updatedAtMillis: Long
 ) {
-    /** 从关注基准收盘价到最新价格的累计涨跌幅。 */
+    /** 从关注时基准价到最新价格的累计涨跌幅。 */
     val watchChangePercent: Double?
         get() {
             val baseClose = watchBaseClose?.takeIf { it > 0 } ?: return null

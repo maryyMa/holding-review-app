@@ -17,7 +17,6 @@ import com.example.holdingreview.data.seed.PersonalPortfolioSeedSource
 import com.example.holdingreview.domain.model.DailyReview
 import com.example.holdingreview.domain.model.Holding
 import com.example.holdingreview.domain.model.HoldingInput
-import com.example.holdingreview.domain.model.KLinePoint
 import com.example.holdingreview.domain.model.Market
 import com.example.holdingreview.domain.model.MonitorConfig
 import com.example.holdingreview.domain.model.OcrHoldingDraft
@@ -32,7 +31,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.time.Instant
-import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 import javax.inject.Inject
@@ -61,7 +59,7 @@ class DefaultPortfolioRepository @Inject constructor(
     private val quoteRemoteDataSource: QuoteRemoteDataSource,
     /** 本地 K 线缓存 DAO。 */
     private val kLineCacheDao: KLineCacheDao,
-    /** 用于确认关注日基准收盘价的 K 线数据源。 */
+    /** K 线数据源。 */
     private val kLineRemoteDataSource: KLineRemoteDataSource
 ) : PortfolioRepository {
     /**
@@ -183,6 +181,7 @@ class DefaultPortfolioRepository @Inject constructor(
             .filterNot { it.symbol in existingConfigSymbols }
 
         if (missingHoldings.isEmpty() && missingWatchStocks.isEmpty() && missingConfigs.isEmpty()) {
+            refreshMissingWatchBaseCloses(now)
             return false
         }
 
@@ -224,8 +223,8 @@ class DefaultPortfolioRepository @Inject constructor(
                     reason = watch.reason,
                     tags = watch.industry,
                     watchedAtMillis = now,
-                    watchBaseClose = null,
-                    watchBaseCloseDate = null,
+                    watchBaseClose = quote?.latestPrice?.takeIf { it > 0 },
+                    watchBaseCloseDate = quote?.latestPrice?.takeIf { it > 0 }?.let { currentChinaDate(now) },
                     updatedAtMillis = now
                 )
             }
@@ -233,6 +232,7 @@ class DefaultPortfolioRepository @Inject constructor(
         missingConfigs.forEach { config ->
             monitorConfigDao.upsert(config.toMonitorConfig(now).toEntity(now))
         }
+        refreshMissingWatchBaseCloses(now)
         return true
     }
 
@@ -290,8 +290,8 @@ class DefaultPortfolioRepository @Inject constructor(
         val existing = watchStockDao.findBySymbol(normalizedSymbol)
         val watchedAtMillis = existing?.watchedAtMillis?.takeIf { it > 0 } ?: now
         val market = input.market.takeUnless { it == Market.UNKNOWN } ?: Market.fromSymbol(normalizedSymbol)
-        val baseClose = if (existing?.watchBaseClose == null) {
-            resolveWatchBaseClose(normalizedSymbol, market, watchedAtMillis, now)
+        val basePrice = if (existing?.watchBaseClose == null) {
+            resolveWatchBasePrice(normalizedSymbol, now)
         } else {
             null
         }
@@ -303,8 +303,8 @@ class DefaultPortfolioRepository @Inject constructor(
                 reason = input.reason.trim(),
                 tags = input.tags.trim(),
                 watchedAtMillis = watchedAtMillis,
-                watchBaseClose = existing?.watchBaseClose ?: baseClose?.close,
-                watchBaseCloseDate = existing?.watchBaseCloseDate ?: baseClose?.date,
+                watchBaseClose = existing?.watchBaseClose ?: basePrice?.price,
+                watchBaseCloseDate = existing?.watchBaseCloseDate ?: basePrice?.date,
                 updatedAtMillis = now
             )
         )
@@ -380,61 +380,57 @@ class DefaultPortfolioRepository @Inject constructor(
     }
 
     private suspend fun refreshMissingWatchBaseCloses(now: Long) {
-        watchStockDao.getAllOnce()
-            .filter { it.watchBaseClose == null }
-            .forEach { watch ->
-                val baseClose = resolveWatchBaseClose(
-                    symbol = watch.symbol,
-                    market = runCatching { Market.valueOf(watch.market) }.getOrDefault(Market.fromSymbol(watch.symbol)),
-                    watchedAtMillis = watch.watchedAtMillis,
-                    now = now
-                )
-                if (baseClose != null) {
-                    watchStockDao.updateWatchBaseClose(watch.symbol, baseClose.close, baseClose.date)
-                }
+        val missing = watchStockDao.getAllOnce().filter { it.watchBaseClose == null }
+        if (missing.isEmpty()) return
+
+        val symbols = missing.map { it.symbol }.distinct().filter { it.length == 6 }
+        val remoteQuotes = if (symbols.isEmpty()) {
+            emptyList()
+        } else {
+            quoteRemoteDataSource.fetchQuotes(symbols).getOrDefault(emptyList())
+        }
+        if (remoteQuotes.isNotEmpty()) {
+            quoteSnapshotDao.upsertAll(remoteQuotes.map { it.toEntity(now) })
+        }
+        val remoteQuoteMap = remoteQuotes.associateBy { it.symbol }
+        val cachedQuoteMap = quoteSnapshotDao.getAllOnce().associateBy { it.symbol }
+        val baseDate = currentChinaDate(now)
+
+        missing.forEach { watch ->
+            val price = (remoteQuoteMap[watch.symbol]?.latestPrice ?: cachedQuoteMap[watch.symbol]?.latestPrice)
+                .takeIf { it != null && it > 0 }
+            if (price != null) {
+                watchStockDao.updateWatchBaseClose(watch.symbol, price, baseDate)
             }
+        }
     }
 
-    private suspend fun resolveWatchBaseClose(
-        symbol: String,
-        market: Market,
-        watchedAtMillis: Long,
-        now: Long
-    ): WatchBaseClose? {
-        val watchedDate = Instant.ofEpochMilli(watchedAtMillis)
+    private suspend fun resolveWatchBasePrice(symbol: String, now: Long): WatchBasePrice? {
+        val normalizedSymbol = symbol.trim()
+        val cached = quoteSnapshotDao.getAllOnce()
+            .firstOrNull { it.symbol == normalizedSymbol }
+            ?.latestPrice
+            ?.takeIf { it > 0 }
+        if (cached != null) {
+            return WatchBasePrice(price = cached, date = currentChinaDate(now))
+        }
+
+        val quotes = quoteRemoteDataSource.fetchQuotes(listOf(normalizedSymbol)).getOrDefault(emptyList())
+        if (quotes.isNotEmpty()) {
+            quoteSnapshotDao.upsertAll(quotes.map { it.toEntity(now) })
+        }
+        val remotePrice = quotes.firstOrNull { it.symbol == normalizedSymbol }
+            ?.latestPrice
+            ?.takeIf { it > 0 }
+            ?: quotes.firstOrNull()?.latestPrice?.takeIf { it > 0 }
+        return remotePrice?.let { WatchBasePrice(price = it, date = currentChinaDate(now)) }
+    }
+
+    private fun currentChinaDate(now: Long): String {
+        return Instant.ofEpochMilli(now)
             .atZone(ChinaMarketZone)
             .toLocalDate()
-        val watchedDateText = watchedDate.toString()
-        val points = fetchWatchBaseKLines(symbol, market, now)
-        val basePoint = points
-            .filter { it.date <= watchedDateText }
-            .maxByOrNull { it.date }
-            ?: return null
-
-        val nowInChina = Instant.ofEpochMilli(now).atZone(ChinaMarketZone)
-        val isTodayBeforeClose =
-            basePoint.date == watchedDateText &&
-                watchedDate == nowInChina.toLocalDate() &&
-                nowInChina.toLocalTime().isBefore(ChinaMarketCloseConfirmation)
-        if (isTodayBeforeClose) return null
-
-        return WatchBaseClose(close = basePoint.close, date = basePoint.date)
-    }
-
-    private suspend fun fetchWatchBaseKLines(symbol: String, market: Market, now: Long): List<KLinePoint> {
-        val normalizedSymbol = symbol.trim()
-        val remote = kLineRemoteDataSource.fetchDailyKLines(normalizedSymbol, market, 30)
-        return remote.fold(
-            onSuccess = { points ->
-                kLineCacheDao.upsertAll(points.map { it.toEntity(now) })
-                points.sortedBy { it.date }
-            },
-            onFailure = {
-                kLineCacheDao.getRecent(normalizedSymbol, 30)
-                    .map { it.toDomain() }
-                    .sortedBy { it.date }
-            }
-        )
+            .toString()
     }
 
     private suspend fun syncHoldingForOperation(operation: TradeOperation, existing: HoldingEntity?) {
@@ -506,12 +502,11 @@ class DefaultPortfolioRepository @Inject constructor(
         )
     }
 
-    private data class WatchBaseClose(val close: Double, val date: String)
+    private data class WatchBasePrice(val price: Double, val date: String)
 
     private companion object {
         const val TradeFeeRate: Double = 0.0001
         const val QuantityTolerance: Double = 0.000001
         val ChinaMarketZone: ZoneId = ZoneId.of("Asia/Shanghai")
-        val ChinaMarketCloseConfirmation: LocalTime = LocalTime.of(15, 5)
     }
 }

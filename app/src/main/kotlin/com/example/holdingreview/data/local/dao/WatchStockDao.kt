@@ -42,7 +42,7 @@ interface WatchStockDao {
     suspend fun upsertAll(entities: List<WatchStockEntity>)
 
     /**
-     * 只补齐关注基准收盘价，不改变用户最近编辑时间。
+     * 只补齐关注时基准价，不改变用户最近编辑时间。
      */
     @Query("UPDATE watch_stocks SET watchBaseClose = :baseClose, watchBaseCloseDate = :baseCloseDate WHERE symbol = :symbol")
     suspend fun updateWatchBaseClose(symbol: String, baseClose: Double, baseCloseDate: String)

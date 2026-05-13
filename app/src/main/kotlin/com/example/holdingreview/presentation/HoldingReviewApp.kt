@@ -686,7 +686,7 @@ private fun WatchInfoCard(state: WatchAlertsUiState, latestPrice: Double?) {
         }
         if (watch.watchBaseClose != null || watch.watchBaseCloseDate != null) {
             Text(
-                "关注基准：${watch.watchBaseClose?.let { money(it) } ?: "--"} · ${watch.watchBaseCloseDate ?: "--"}",
+                "关注价：${watch.watchBaseClose?.let { plainPrice(it) } ?: "--"} · ${watch.watchBaseCloseDate ?: "--"}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -1572,8 +1572,9 @@ private fun WatchStockMetricGrid(
             WatchStockMetric("市值", stock.marketValue?.let { money(it) } ?: "--", Modifier.weight(1f))
             WatchStockMetric(
                 "成本/现价",
-                "${stock.costPrice?.let { money(it) } ?: "--"}\n${stock.latestPrice?.let { money(it) } ?: "--"}",
-                Modifier.weight(1f)
+                costAndLatestText(stock.costPrice, stock.latestPrice),
+                Modifier.weight(1f),
+                valueMaxLines = 1
             )
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1671,6 +1672,14 @@ private fun AlertActionText(text: String) {
 private fun formatPlainNumber(value: Double): String {
     val longValue = value.toLong()
     return if (value == longValue.toDouble()) longValue.toString() else value.toString()
+}
+
+private fun costAndLatestText(costPrice: Double?, latestPrice: Double?): String {
+    return "${costPrice?.let { plainPrice(it) } ?: "--"}/${latestPrice?.let { plainPrice(it) } ?: "--"}"
+}
+
+private fun plainPrice(value: Double): String {
+    return String.format(Locale.CHINA, "%.2f", value)
 }
 
 private fun watchChangePercent(baseClose: Double?, latestPrice: Double?): Double? {

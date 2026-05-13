@@ -49,9 +49,9 @@ data class WatchStockEntity(
     val tags: String,
     /** 首次加入关注列表的时间，单位为 epoch 毫秒。 */
     val watchedAtMillis: Long,
-    /** 加入关注时对应交易日的收盘价。 */
+    /** 加入关注时记录的当前价。 */
     val watchBaseClose: Double?,
-    /** [watchBaseClose] 对应的 yyyy-MM-dd 交易日。 */
+    /** [watchBaseClose] 对应的 yyyy-MM-dd 记录日期。 */
     val watchBaseCloseDate: String?,
     /** 最近本地更新时间，单位为 epoch 毫秒。 */
     val updatedAtMillis: Long

@@ -352,7 +352,7 @@ data class WatchListItem(
     val quantity: Double?,
     /** 当日盈亏；未持仓时为空。 */
     val dayProfit: Double?,
-    /** 从关注基准收盘价到最新价的涨跌幅；没有关注基准时为空。 */
+    /** 从加入关注时的基准价到最新价的涨跌幅；没有关注基准时为空。 */
     val watchChangePercent: Double?,
     /** 该股票历史预警数量。 */
     val alertCount: Int,
