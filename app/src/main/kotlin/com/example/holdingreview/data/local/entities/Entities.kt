@@ -47,6 +47,12 @@ data class WatchStockEntity(
     val reason: String,
     /** 用于给关注列表条目分组的自由标签。 */
     val tags: String,
+    /** 首次加入关注列表的时间，单位为 epoch 毫秒。 */
+    val watchedAtMillis: Long,
+    /** 加入关注时对应交易日的收盘价。 */
+    val watchBaseClose: Double?,
+    /** [watchBaseClose] 对应的 yyyy-MM-dd 交易日。 */
+    val watchBaseCloseDate: String?,
     /** 最近本地更新时间，单位为 epoch 毫秒。 */
     val updatedAtMillis: Long
 )
@@ -94,6 +100,26 @@ data class DailyReviewEntity(
     /** 已保存的 AI Prompt 文本。 */
     val aiPrompt: String,
     /** 复盘保存时间，单位为 epoch 毫秒。 */
+    val createdAtMillis: Long
+)
+
+/**
+ * 用户手动记录的买入/卖出操作。
+ */
+@Entity(
+    tableName = "trade_operations",
+    indices = [Index(value = ["symbol"]), Index(value = ["occurredAtMillis"])]
+)
+data class TradeOperationEntity(
+    @PrimaryKey val id: String,
+    val symbol: String,
+    val side: String,
+    val quantity: Double,
+    val price: Double,
+    val fee: Double,
+    val occurredAtMillis: Long,
+    val note: String,
+    val realizedProfit: Double?,
     val createdAtMillis: Long
 )
 

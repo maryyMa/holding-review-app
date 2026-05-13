@@ -5,6 +5,8 @@ import com.example.holdingreview.domain.model.Holding
 import com.example.holdingreview.domain.model.HoldingInput
 import com.example.holdingreview.domain.model.OcrHoldingDraft
 import com.example.holdingreview.domain.model.QuoteSnapshot
+import com.example.holdingreview.domain.model.TradeOperation
+import com.example.holdingreview.domain.model.TradeOperationInput
 import com.example.holdingreview.domain.model.WatchStock
 import com.example.holdingreview.domain.model.WatchStockInput
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +28,10 @@ interface PortfolioRepository {
      */
     fun observeWatchStocks(): Flow<List<WatchStock>>
     /**
+     * 观察某只股票的交易操作记录。
+     */
+    fun observeTradeOperations(symbol: String): Flow<List<TradeOperation>>
+    /**
      * 观察所有缓存行情快照。
      */
     fun observeQuotes(): Flow<List<QuoteSnapshot>>
@@ -39,9 +45,9 @@ interface PortfolioRepository {
     suspend fun lookupQuote(symbol: String): Result<QuoteSnapshot>
 
     /**
-     * 本地数据库为空时写入演示数据。
+     * 本地数据库为空时导入内置个人数据；没有内置数据时写入演示数据。
      */
-    suspend fun seedIfEmpty()
+    suspend fun seedIfEmpty(): Result<Boolean>
     /**
      * 根据表单输入创建或更新持仓。
      */
@@ -62,6 +68,10 @@ interface PortfolioRepository {
      * 根据股票代码删除关注股票。
      */
     suspend fun deleteWatchStock(symbol: String)
+    /**
+     * 保存一笔交易操作，并同步更新持仓。
+     */
+    suspend fun addTradeOperation(input: TradeOperationInput): Result<TradeOperation>
     /**
      * 为持仓和关注股票刷新远程行情。
      */

@@ -12,8 +12,34 @@ import kotlinx.coroutines.flow.Flow
  */
 @Dao
 interface MonitorAlertDao {
-    @Query("SELECT * FROM monitor_alerts ORDER BY triggeredAtMillis DESC")
+    @Query(
+        """
+        SELECT * FROM monitor_alerts
+        ORDER BY
+            CASE level
+                WHEN 'CRITICAL' THEN 0
+                WHEN 'WARNING' THEN 1
+                ELSE 2
+            END ASC,
+            triggeredAtMillis DESC
+        """
+    )
     fun observeAll(): Flow<List<MonitorAlertEntity>>
+
+    @Query(
+        """
+        SELECT * FROM monitor_alerts
+        WHERE symbol = :symbol
+        ORDER BY
+            CASE level
+                WHEN 'CRITICAL' THEN 0
+                WHEN 'WARNING' THEN 1
+                ELSE 2
+            END ASC,
+            triggeredAtMillis DESC
+        """
+    )
+    fun observeBySymbol(symbol: String): Flow<List<MonitorAlertEntity>>
 
     @Query("SELECT * FROM monitor_alerts WHERE id = :id LIMIT 1")
     fun observeById(id: String): Flow<MonitorAlertEntity?>
@@ -39,4 +65,13 @@ interface MonitorAlertDao {
 
     @Query("UPDATE monitor_alerts SET isRead = 1")
     suspend fun markAllRead()
+
+    @Query("DELETE FROM monitor_alerts WHERE isRead = 1")
+    suspend fun deleteRead()
+
+    @Query("DELETE FROM monitor_alerts WHERE symbol = :symbol AND isRead = 1")
+    suspend fun deleteReadBySymbol(symbol: String)
+
+    @Query("DELETE FROM monitor_alerts WHERE symbol = :symbol")
+    suspend fun deleteBySymbol(symbol: String)
 }

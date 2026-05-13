@@ -9,6 +9,7 @@ captures/
 .cxx/
 app/build/
 *.hprof
+app/src/main/assets/personal_portfolio.local.json
 /stock-monitor-skill/scripts/analyser.py
 /stock-monitor-skill/scripts/control.sh
 /stock-monitor-skill/scripts/monitor.py

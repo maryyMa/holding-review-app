@@ -1,12 +1,18 @@
 package com.example.holdingreview.presentation
 
 import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -14,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -22,7 +29,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.ImageSearch
-import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -54,10 +60,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -69,10 +79,10 @@ import androidx.navigation.compose.rememberNavController
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import com.example.holdingreview.domain.model.Holding
 import com.example.holdingreview.domain.model.HoldingInput
 import com.example.holdingreview.domain.model.Market
-import com.example.holdingreview.domain.model.MarketSignal
 import com.example.holdingreview.domain.model.MonitorAlert
 import com.example.holdingreview.domain.model.MonitorAlertLevel
 import com.example.holdingreview.domain.model.MonitorConfig
@@ -80,11 +90,15 @@ import com.example.holdingreview.domain.model.MonitorTarget
 import com.example.holdingreview.domain.model.PortfolioSnapshot
 import com.example.holdingreview.domain.model.QuoteSnapshot
 import com.example.holdingreview.domain.model.SecurityType
-import com.example.holdingreview.domain.util.compactNumber
+import com.example.holdingreview.domain.model.TradeOperation
+import com.example.holdingreview.domain.model.TradeOperationSide
 import com.example.holdingreview.domain.util.money
 import com.example.holdingreview.domain.util.percent
 import com.example.holdingreview.domain.util.signedMoney
 import com.example.holdingreview.domain.util.signedPercent
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 单 Activity 导航图使用的路由名称。
@@ -96,6 +110,10 @@ private object Routes {
     const val WATCH = "watch"
     /** 添加关注股票路由。 */
     const val WATCH_ADD = "watch/add"
+    /** 单只关注股票预警列表路由。 */
+    const val WATCH_ALERTS = "watch/alerts/{symbol}"
+    /** 单只股票买入/卖出操作表单路由。 */
+    const val TRADE_OPERATION = "watch/operation/{symbol}"
     /** 股票预警列表路由。*/
     const val MONITOR = "monitor"
     /** 预警详情路由。*/
@@ -110,8 +128,10 @@ private object Routes {
     const val EDIT = "edit/{holdingId}"
     /**
      * 为新增或已有持仓构建具体的编辑路由。
-     */
+    */
     fun edit(id: String = "new") = "edit/$id"
+    fun watchAlerts(symbol: String) = "watch/alerts/$symbol"
+    fun tradeOperation(symbol: String) = "watch/operation/$symbol"
     fun monitorDetail(id: String) = "monitor/$id"
     fun monitorSettings(symbol: String) = "monitor/settings/$symbol"
 }
@@ -122,6 +142,10 @@ private val HoldingWatchPurple = Color(0xFF7B1FA2)
 private val ChinaRiseRed = Color(0xFFC62828)
 /** 中国市场习惯中的下跌绿色。 */
 private val ChinaFallGreen = Color(0xFF2E7D32)
+/** 交易操作默认手续费率：万一。 */
+private const val TradeFeeRate = 0.0001
+/** 首页异动提示操作按钮统一高度。 */
+private val AlertActionButtonHeight = 44.dp
 
 /**
  * 底部导航项元数据。
@@ -136,18 +160,35 @@ private data class NavItem(
 )
 
 /**
- * 展示组合仪表盘、异动信号列表和持仓列表。
+ * 展示组合仪表盘和监控预警列表。
  */
 @Composable
 private fun HomeRoute(
     /** 打开新增持仓表单。 */
     onAddHolding: () -> Unit,
-    /** 根据持仓 id 打开编辑表单。 */
-    onEditHolding: (String) -> Unit,
+    /** 打开预警详情。 */
+    onOpenAlert: (String) -> Unit,
     /** 提供首页状态和操作的 ViewModel。 */
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var canPostNotifications by remember { mutableStateOf(canPostStockNotifications(context)) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        canPostNotifications = granted
+        if (granted) viewModel.runMonitorNow()
+    }
+
+    fun runMonitor() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !canPostNotifications) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            viewModel.runMonitorNow()
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -173,20 +214,60 @@ private fun HomeRoute(
         }
         item {
             SectionTitle("异动提示")
-            if (state.signals.isEmpty()) {
-                EmptyText("暂无明显异动，刷新行情后会根据涨跌幅、贡献和仓位生成提示。")
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    state.signals.take(5).forEach { SignalCard(it) }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                FilledTonalButton(
+                    onClick = viewModel::markAllAlertsRead,
+                    enabled = state.unreadCount > 0,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(AlertActionButtonHeight)
+                ) {
+                    AlertActionText("全部已读")
+                }
+                FilledTonalButton(
+                    onClick = viewModel::clearReadAlerts,
+                    enabled = state.alerts.any { it.isRead },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(AlertActionButtonHeight)
+                ) {
+                    AlertActionText("清除已读")
+                }
+                Button(
+                    onClick = ::runMonitor,
+                    enabled = !state.isRunningMonitor,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(AlertActionButtonHeight)
+                ) {
+                    Icon(Icons.Filled.Refresh, contentDescription = null)
+                    Spacer(Modifier.width(4.dp))
+                    AlertActionText(if (state.isRunningMonitor) "检查中" else "立即检查")
                 }
             }
-        }
-        item { SectionTitle("持仓列表") }
-        if (state.holdings.isEmpty()) {
-            item { EmptyText("还没有持仓，先新增一只股票或通过截图导入。") }
-        } else {
-            items(state.holdings, key = { it.id }) { holding ->
-                HoldingCard(holding, onClick = { onEditHolding(holding.id) })
+            Text(
+                "已覆盖 ${state.targetCount} 只股票，未读预警 ${state.unreadCount} 条",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !canPostNotifications) {
+                CardWithPadding {
+                    Text("通知未开启，严重和警告预警只能在 App 内查看。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FilledTonalButton(
+                        onClick = { notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("开启通知")
+                    }
+                }
+            }
+            if (state.alerts.isEmpty()) {
+                EmptyText("暂无预警。点击立即检查后，会根据成本、涨跌幅、量能、均线、RSI、跳空和动态止盈生成提醒。")
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.alerts.forEach { alert ->
+                        MonitorAlertCard(alert, onClick = { onOpenAlert(alert.id) })
+                    }
+                }
             }
         }
         item { Spacer(Modifier.height(12.dp)) }
@@ -198,18 +279,30 @@ private fun HomeRoute(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HoldingReviewApp() {
+fun HoldingReviewApp(
+    notificationAlertId: String? = null,
+    onNotificationAlertHandled: () -> Unit = {}
+) {
     val navController = rememberNavController()
     val navItems = listOf(
         NavItem(Routes.HOME, "首页") { Icon(Icons.Filled.Home, contentDescription = null) },
         NavItem(Routes.WATCH, "关注") { Icon(Icons.Filled.Star, contentDescription = null) },
-        NavItem(Routes.MONITOR, "预警") { Icon(Icons.Filled.Notifications, contentDescription = null) },
         NavItem(Routes.OCR, "导入") { Icon(Icons.Filled.ImageSearch, contentDescription = null) },
         NavItem(Routes.REVIEW, "复盘") { Icon(Icons.Filled.Article, contentDescription = null) }
     )
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = backStackEntry?.destination
     val currentRoute = currentDestination?.route
+
+    LaunchedEffect(notificationAlertId) {
+        val alertId = notificationAlertId
+        if (!alertId.isNullOrBlank()) {
+            navController.navigate(Routes.monitorDetail(alertId)) {
+                launchSingleTop = true
+            }
+            onNotificationAlertHandled()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -224,7 +317,7 @@ fun HoldingReviewApp() {
                                 Text("添加关注")
                             }
                         }
-                        Routes.WATCH_ADD -> Unit
+                        Routes.WATCH_ADD, Routes.WATCH_ALERTS, Routes.TRADE_OPERATION -> Unit
                         Routes.MONITOR, Routes.MONITOR_DETAIL, Routes.MONITOR_SETTINGS -> Unit
                         else -> {
                             TextButton(onClick = { navController.navigate(Routes.edit()) }) {
@@ -241,10 +334,10 @@ fun HoldingReviewApp() {
             NavigationBar {
                 navItems.forEach { item ->
                     val selected = when (item.route) {
-                        Routes.WATCH -> currentRoute == Routes.WATCH || currentRoute == Routes.WATCH_ADD
-                        Routes.MONITOR -> currentRoute == Routes.MONITOR ||
-                            currentRoute == Routes.MONITOR_DETAIL ||
-                            currentRoute == Routes.MONITOR_SETTINGS
+                        Routes.WATCH -> currentRoute == Routes.WATCH ||
+                            currentRoute == Routes.WATCH_ADD ||
+                            currentRoute == Routes.WATCH_ALERTS ||
+                            currentRoute == Routes.TRADE_OPERATION
                         else -> currentDestination?.hierarchy?.any { it.route == item.route } == true
                     }
                     NavigationBarItem(
@@ -271,12 +364,24 @@ fun HoldingReviewApp() {
             composable(Routes.HOME) {
                 HomeRoute(
                     onAddHolding = { navController.navigate(Routes.edit()) },
-                    onEditHolding = { navController.navigate(Routes.edit(it)) }
+                    onOpenAlert = { navController.navigate(Routes.monitorDetail(it)) }
                 )
             }
-            composable(Routes.WATCH) { WatchListRoute() }
+            composable(Routes.WATCH) {
+                WatchListRoute(onOpenAlerts = { navController.navigate(Routes.watchAlerts(it)) })
+            }
             composable(Routes.WATCH_ADD) {
                 WatchEditRoute(onDone = { navController.popBackStack() })
+            }
+            composable(Routes.WATCH_ALERTS) {
+                WatchAlertsRoute(
+                    onOpenAlert = { navController.navigate(Routes.monitorDetail(it)) },
+                    onOpenSettings = { navController.navigate(Routes.monitorSettings(it)) },
+                    onAddOperation = { navController.navigate(Routes.tradeOperation(it)) }
+                )
+            }
+            composable(Routes.TRADE_OPERATION) {
+                TradeOperationRoute(onDone = { navController.popBackStack() })
             }
             composable(Routes.MONITOR) {
                 MonitorRoute(
@@ -285,7 +390,16 @@ fun HoldingReviewApp() {
                 )
             }
             composable(Routes.MONITOR_DETAIL) {
-                MonitorDetailRoute(onBack = { navController.popBackStack() })
+                MonitorDetailRoute(
+                    onBack = { navController.popBackStack() },
+                    onMissing = {
+                        navController.navigate(Routes.HOME) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
             }
             composable(Routes.MONITOR_SETTINGS) {
                 MonitorSettingsRoute(onDone = { navController.popBackStack() })
@@ -415,7 +529,10 @@ private fun HoldingEditRoute(
  * 展示已持仓股票和关注股票合并后的列表。
  */
 @Composable
-private fun WatchListRoute(viewModel: WatchListViewModel = hiltViewModel()) {
+private fun WatchListRoute(
+    onOpenAlerts: (String) -> Unit,
+    viewModel: WatchListViewModel = hiltViewModel()
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     LazyColumn(
@@ -441,9 +558,296 @@ private fun WatchListRoute(viewModel: WatchListViewModel = hiltViewModel()) {
         }
         if (state.items.isEmpty()) {
             item { EmptyText("暂无持仓或关注股票") }
+        } else {
+            item {
+                WatchStockTable(
+                    items = state.items,
+                    onOpenAlerts = onOpenAlerts,
+                    onDelete = viewModel::delete
+                )
+            }
         }
-        items(state.items, key = { it.symbol }) { stock ->
-            WatchStockCard(stock, onDelete = { viewModel.delete(stock.symbol) })
+        item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+@Composable
+private fun WatchAlertsRoute(
+    onOpenAlert: (String) -> Unit,
+    onOpenSettings: (String) -> Unit,
+    onAddOperation: (String) -> Unit,
+    viewModel: WatchAlertsViewModel = hiltViewModel()
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val title = state.target?.name ?: state.watchStock?.name ?: state.holding?.name ?: state.symbol
+    val latestPrice = state.target?.latestPrice ?: state.watchStock?.latestPrice ?: state.holding?.currentPrice
+    val changePercent = state.target?.dayChangePercent ?: state.watchStock?.dayChangePercent ?: state.holding?.dayChangePercent
+    val marketText = state.holding?.market?.displayName
+        ?: state.watchStock?.market?.displayName
+        ?: state.target?.market?.displayName
+        ?: "--"
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            SectionTitle("$title 工作台")
+            CardWithPadding {
+                Text("${state.symbol} · $marketText", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "现价 ${latestPrice?.let { money(it) } ?: "--"} · 涨跌 ${changePercent?.let { signedPercent(it) } ?: "--"}",
+                    color = changePercent.changeColor()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    FilledTonalButton(onClick = { onOpenSettings(state.symbol) }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Filled.Settings, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("监控设置")
+                    }
+                    Button(onClick = { onAddOperation(state.symbol) }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("添加操作")
+                    }
+                }
+            }
+        }
+        item {
+            SectionTitle("持仓指标")
+            HoldingMetricsCard(state.holding)
+        }
+        item {
+            SectionTitle("关注信息")
+            WatchInfoCard(state = state, latestPrice = latestPrice)
+        }
+        item {
+            SectionTitle("监控状态")
+            MonitorStatusCard(state)
+        }
+        item {
+            SectionTitle("预警记录")
+            FilledTonalButton(
+                onClick = viewModel::clearReadAlerts,
+                enabled = state.alerts.any { it.isRead },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("清除已读")
+            }
+        }
+        if (state.alerts.isEmpty()) {
+            item { EmptyText("这只股票暂无预警记录。") }
+        } else {
+            items(state.alerts, key = { it.id }) { alert ->
+                MonitorAlertCard(alert, onClick = { onOpenAlert(alert.id) })
+            }
+        }
+        item { SectionTitle("操作记录") }
+        if (state.operations.isEmpty()) {
+            item { EmptyText("暂无买入或卖出操作记录。") }
+        } else {
+            items(state.operations, key = { it.id }) { operation ->
+                TradeOperationCard(operation)
+            }
+        }
+        item { Spacer(Modifier.height(12.dp)) }
+    }
+}
+
+@Composable
+private fun HoldingMetricsCard(holding: Holding?) {
+    CardWithPadding {
+        if (holding == null) {
+            Text("当前未持仓。买入操作保存后会自动生成持仓。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallMetric("市值", money(holding.marketValue), Modifier.weight(1f))
+                SmallMetric("持仓数量", formatPlainNumber(holding.quantity), Modifier.weight(1f))
+                SmallMetric("成本价", money(holding.costPrice), Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallMetric("总盈亏", signedMoney(holding.totalProfit), Modifier.weight(1f))
+                SmallMetric("当日盈亏", signedMoney(holding.dayProfit), Modifier.weight(1f))
+                SmallMetric("总收益率", signedPercent(holding.totalProfitPercent), Modifier.weight(1f))
+            }
+            if (holding.note.isNotBlank()) {
+                Text(holding.note, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatchInfoCard(state: WatchAlertsUiState, latestPrice: Double?) {
+    val watch = state.watchStock
+    CardWithPadding {
+        if (watch == null) {
+            Text("这只股票来自持仓列表，尚未单独加入关注。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            Text("关注原因：${watch.reason.ifBlank { "--" }}")
+            Text("行业：${watch.tags.ifBlank { "--" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "关注基准：${watch.watchBaseClose?.let { money(it) } ?: "--"} · ${watch.watchBaseCloseDate ?: "--"}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val change = watchChangePercent(watch.watchBaseClose, latestPrice)
+            Text(
+                "关注后涨幅：${change?.let { signedPercent(it) } ?: "--"}",
+                color = change.changeColor()
+            )
+        }
+    }
+}
+
+@Composable
+private fun MonitorStatusCard(state: WatchAlertsUiState) {
+    CardWithPadding {
+        val config = state.config
+        Text(if (config?.enabled == false) "监控已暂停" else "监控已启用", fontWeight = FontWeight.SemiBold)
+        Text(
+            "历史预警 ${state.alerts.size} 条 · 未读 ${state.alerts.count { !it.isRead }} 条",
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (state.target != null) {
+            Text(
+                "${state.target.securityType.label()} · ${state.target.market.displayName}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun TradeOperationCard(operation: TradeOperation) {
+    val isBuy = operation.side == TradeOperationSide.BUY
+    val sideText = if (isBuy) "买入" else "卖出"
+    val sideColor = if (isBuy) ChinaRiseRed else ChinaFallGreen
+    CardWithPadding {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(sideText, color = sideColor, fontWeight = FontWeight.Bold)
+                Text(formatDateTime(operation.occurredAtMillis), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(money(operation.amount), fontWeight = FontWeight.SemiBold)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SmallMetric("数量", formatPlainNumber(operation.quantity), Modifier.weight(1f))
+            SmallMetric("价格", money(operation.price), Modifier.weight(1f))
+            SmallMetric("手续费", money(operation.fee), Modifier.weight(1f))
+        }
+        operation.realizedProfit?.let {
+            Text("已实现盈亏 ${signedMoney(it)}", color = it.changeColor())
+        }
+        if (operation.note.isNotBlank()) {
+            Text(operation.note, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun TradeOperationRoute(
+    onDone: () -> Unit,
+    viewModel: TradeOperationFormViewModel = hiltViewModel()
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var side by remember { mutableStateOf(TradeOperationSide.BUY) }
+    var quantity by remember { mutableStateOf("") }
+    var price by remember { mutableStateOf("") }
+    var occurredAt by remember { mutableStateOf(formatDateTime(System.currentTimeMillis())) }
+    var note by remember { mutableStateOf("") }
+    var localMessage by remember { mutableStateOf<String?>(null) }
+    val quantityValue = quantity.toDoubleOrNull()
+    val priceValue = price.toDoubleOrNull()
+    val feePreview = if (quantityValue != null && quantityValue > 0 && priceValue != null && priceValue > 0) {
+        quantityValue * priceValue * TradeFeeRate
+    } else {
+        null
+    }
+
+    LaunchedEffect(state.latestPrice) {
+        if (price.isBlank()) {
+            state.latestPrice?.let { price = formatPlainNumber(it) }
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            MessageBanner(state.message ?: localMessage) {
+                viewModel.clearMessage()
+                localMessage = null
+            }
+            SectionTitle("添加操作")
+            CardWithPadding {
+                Text(state.symbol, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                state.holding?.let {
+                    Text("当前持仓 ${formatPlainNumber(it.quantity)} · 成本 ${money(it.costPrice)}")
+                } ?: Text("当前未持仓，保存买入后会自动建仓。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (side == TradeOperationSide.BUY) {
+                        Button(onClick = { side = TradeOperationSide.BUY }, modifier = Modifier.weight(1f)) { Text("买入") }
+                    } else {
+                        FilledTonalButton(onClick = { side = TradeOperationSide.BUY }, modifier = Modifier.weight(1f)) { Text("买入") }
+                    }
+                    if (side == TradeOperationSide.SELL) {
+                        Button(onClick = { side = TradeOperationSide.SELL }, modifier = Modifier.weight(1f)) { Text("卖出") }
+                    } else {
+                        FilledTonalButton(onClick = { side = TradeOperationSide.SELL }, modifier = Modifier.weight(1f)) { Text("卖出") }
+                    }
+                }
+                OutlinedTextField(
+                    value = quantity,
+                    onValueChange = { quantity = it },
+                    label = { Text("数量") },
+                    keyboardOptions = numberKeyboard(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = price,
+                    onValueChange = { price = it },
+                    label = { Text("价格") },
+                    keyboardOptions = numberKeyboard(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = occurredAt,
+                    onValueChange = { occurredAt = it },
+                    label = { Text("日期时间") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { note = it },
+                    label = { Text("备注") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text(
+                    "手续费（万一）：${feePreview?.let { money(it) } ?: "--"}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Button(
+                    onClick = {
+                        val occurredAtMillis = parseDateTimeMillis(occurredAt)
+                        if (occurredAtMillis == null) {
+                            localMessage = "日期时间格式请使用 yyyy-MM-dd HH:mm"
+                        } else {
+                            viewModel.save(side, quantity, price, occurredAtMillis, note, onDone)
+                        }
+                    },
+                    enabled = !state.isSaving,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Filled.Save, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (state.isSaving) "保存中" else "保存操作")
+                }
+            }
         }
         item { Spacer(Modifier.height(12.dp)) }
     }
@@ -613,7 +1017,7 @@ private fun MonitorRoute(
                     Button(onClick = ::runMonitor, enabled = !state.isRunning) {
                         Icon(Icons.Filled.Refresh, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text(if (state.isRunning) "监控中" else "立即监控")
+                        Text(if (state.isRunning) "检查中" else "立即检查")
                     }
                 }
             }
@@ -623,7 +1027,7 @@ private fun MonitorRoute(
             )
         }
         if (state.alerts.isEmpty()) {
-            item { EmptyText("暂无预警。点击立即监控后，会根据成本、涨跌幅、量能、均线、RSI、跳空和动态止盈生成提醒。") }
+            item { EmptyText("暂无预警。点击立即检查后，会根据成本、涨跌幅、量能、均线、RSI、跳空和动态止盈生成提醒。") }
         } else {
             items(state.alerts, key = { it.id }) { alert ->
                 MonitorAlertCard(alert = alert, onClick = { onOpenAlert(alert.id) })
@@ -649,11 +1053,15 @@ private fun MonitorRoute(
 @Composable
 private fun MonitorDetailRoute(
     onBack: () -> Unit,
+    onMissing: () -> Unit,
     viewModel: MonitorDetailViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    LaunchedEffect(state.alert?.id) {
-        if (state.alert != null) viewModel.markRead()
+    LaunchedEffect(state.isLoaded, state.alert?.id) {
+        when {
+            state.alert != null -> viewModel.markRead()
+            state.isLoaded -> onMissing()
+        }
     }
     LazyColumn(
         modifier = Modifier
@@ -662,7 +1070,9 @@ private fun MonitorDetailRoute(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         val alert = state.alert
-        if (alert == null) {
+        if (!state.isLoaded) {
+            item { EmptyText("正在加载预警详情...") }
+        } else if (alert == null) {
             item { EmptyText("没有找到这条预警记录。") }
         } else {
             item {
@@ -1001,40 +1411,179 @@ private fun HoldingCard(holding: Holding, onClick: () -> Unit) {
 }
 
 /**
- * 展示一个关注列表行，包含行情数据和删除操作。
+ * 以横向滚动表格展示持仓和关注股票。
  */
 @Composable
-private fun WatchStockCard(stock: WatchListItem, onDelete: () -> Unit) {
-    val identityColor = if (stock.isHolding) HoldingWatchPurple else MaterialTheme.colorScheme.onSurface
-    val changeColor = stock.dayChangePercent?.let {
-        when {
-            it > 0 -> ChinaRiseRed
-            it < 0 -> ChinaFallGreen
-            else -> MaterialTheme.colorScheme.onSurfaceVariant
+private fun WatchStockTable(
+    items: List<WatchListItem>,
+    onOpenAlerts: (String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    val scrollState = rememberScrollState()
+    Column(Modifier.horizontalScroll(scrollState)) {
+        WatchTableHeader()
+        items.forEach { stock ->
+            WatchTableRow(stock, onOpenAlerts = onOpenAlerts, onDelete = onDelete)
         }
-    } ?: MaterialTheme.colorScheme.onSurfaceVariant
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(stock.name, color = identityColor, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "${stock.symbol} · ${stock.market.displayName} · ${stock.industry.ifBlank { "行业未填" }}",
-                    color = identityColor
-                )
-                Text(
-                    "现价 ${stock.latestPrice?.let { money(it) } ?: "--"} · 涨跌 ${stock.dayChangePercent?.let { signedPercent(it) } ?: "--"}",
-                    color = changeColor
-                )
-                if (stock.reason.isNotBlank()) Text(stock.reason, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (stock.isHolding) Text("已持仓", color = HoldingWatchPurple, style = MaterialTheme.typography.labelMedium)
-            }
-            if (stock.isWatched) {
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, contentDescription = "删除")
+    }
+}
+
+@Composable
+private fun WatchTableHeader() {
+    Row {
+        WatchTableCell("股票/市值", WatchTableWidths.name, isHeader = true)
+        WatchTableCell("盈亏", WatchTableWidths.money, isHeader = true)
+        WatchTableCell("成本/现价", WatchTableWidths.money, isHeader = true)
+        WatchTableCell("持仓数量", WatchTableWidths.quantity, isHeader = true)
+        WatchTableCell("当日盈亏", WatchTableWidths.money, isHeader = true)
+        WatchTableCell("关注后涨幅", WatchTableWidths.percent, isHeader = true)
+        WatchTableCell("预警数量", WatchTableWidths.count, isHeader = true)
+        WatchTableCell("行业", WatchTableWidths.industry, isHeader = true)
+    }
+}
+
+@Composable
+private fun WatchTableRow(
+    stock: WatchListItem,
+    onOpenAlerts: (String) -> Unit,
+    onDelete: (String) -> Unit
+) {
+    val profitColor = stock.totalProfit.changeColor()
+    val dayProfitColor = stock.dayProfit.changeColor()
+    val watchChangeColor = stock.watchChangePercent.changeColor()
+    Row(
+        modifier = Modifier.clickable { onOpenAlerts(stock.symbol) },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        WatchTableCell(WatchTableWidths.name) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        stock.name,
+                        color = if (stock.isHolding) HoldingWatchPurple else MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        stock.marketValue?.let { money(it) } ?: "--",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
+                    )
+                }
+                if (stock.isWatched) {
+                    IconButton(onClick = { onDelete(stock.symbol) }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "删除")
+                    }
                 }
             }
         }
+        WatchTableCell(stock.totalProfit?.let { signedMoney(it) } ?: "--", WatchTableWidths.money, color = profitColor)
+        WatchTableCell(
+            "${stock.costPrice?.let { money(it) } ?: "--"}\n${stock.latestPrice?.let { money(it) } ?: "--"}",
+            WatchTableWidths.money
+        )
+        WatchTableCell(stock.quantity?.let { formatPlainNumber(it) } ?: "--", WatchTableWidths.quantity)
+        WatchTableCell(stock.dayProfit?.let { signedMoney(it) } ?: "--", WatchTableWidths.money, color = dayProfitColor)
+        WatchTableCell(stock.watchChangePercent?.let { signedPercent(it) } ?: "--", WatchTableWidths.percent, color = watchChangeColor)
+        WatchTableCell(stock.alertCount.toString(), WatchTableWidths.count)
+        WatchTableCell(stock.industry.ifBlank { "--" }, WatchTableWidths.industry)
     }
+}
+
+@Composable
+private fun WatchTableCell(
+    text: String,
+    width: Dp,
+    isHeader: Boolean = false,
+    color: Color? = null
+) {
+    WatchTableCell(width, isHeader) {
+        Text(
+            text = text,
+            color = if (isHeader) MaterialTheme.colorScheme.onSurfaceVariant else color ?: MaterialTheme.colorScheme.onSurface,
+            fontWeight = if (isHeader) FontWeight.SemiBold else FontWeight.Normal,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+@Composable
+private fun WatchTableCell(
+    width: Dp,
+    isHeader: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(width)
+            .defaultMinSize(minHeight = if (isHeader) 44.dp else 64.dp)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            .padding(8.dp),
+        verticalArrangement = Arrangement.Center,
+        content = content
+    )
+}
+
+@Composable
+private fun Double?.changeColor(): Color {
+    return when {
+        this == null -> MaterialTheme.colorScheme.onSurface
+        this > 0 -> ChinaRiseRed
+        this < 0 -> ChinaFallGreen
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+}
+
+private object WatchTableWidths {
+    val name = 132.dp
+    val money = 112.dp
+    val quantity = 96.dp
+    val percent = 112.dp
+    val count = 84.dp
+    val industry = 112.dp
+}
+
+@Composable
+private fun AlertActionText(text: String) {
+    Text(
+        text = text,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        fontSize = 13.sp
+    )
+}
+
+private fun formatPlainNumber(value: Double): String {
+    val longValue = value.toLong()
+    return if (value == longValue.toDouble()) longValue.toString() else value.toString()
+}
+
+private fun watchChangePercent(baseClose: Double?, latestPrice: Double?): Double? {
+    val base = baseClose?.takeIf { it > 0 } ?: return null
+    val latest = latestPrice ?: return null
+    return (latest - base) / base * 100
+}
+
+private fun formatDateTime(millis: Long): String {
+    return dateTimeFormatter().format(Date(millis))
+}
+
+private fun parseDateTimeMillis(text: String): Long? {
+    return runCatching { dateTimeFormatter().parse(text.trim())?.time }.getOrNull()
+}
+
+private fun dateTimeFormatter(): SimpleDateFormat {
+    return SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.CHINA).apply {
+        isLenient = false
+    }
+}
+
+private fun canPostStockNotifications(context: Context): Boolean {
+    return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 }
 
 /**
@@ -1045,19 +1594,29 @@ private fun WatchStockCard(stock: WatchListItem, onDelete: () -> Unit) {
  */
 @Composable
 private fun MonitorAlertCard(alert: MonitorAlert, onClick: () -> Unit) {
-    Card(onClick = onClick, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+    val contentColor = if (alert.isRead) {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    val containerColor = if (alert.isRead) {
+        MaterialTheme.colorScheme.surfaceVariant
+    } else {
+        MaterialTheme.colorScheme.surface
+    }
+    Card(onClick = onClick, colors = CardDefaults.cardColors(containerColor = containerColor)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(alert.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text(alert.title, color = contentColor, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                     Text("${alert.symbol} · ${alert.type.displayName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 AssistChip(
                     onClick = onClick,
-                    label = { Text(alert.level.label(), color = alert.level.color()) }
+                    label = { Text(alert.level.label(), color = if (alert.isRead) contentColor else alert.level.color()) }
                 )
             }
-            Text("现价 ${money(alert.latestPrice)} · 涨跌 ${signedPercent(alert.changePercent)}")
+            Text("现价 ${money(alert.latestPrice)} · 涨跌 ${signedPercent(alert.changePercent)}", color = contentColor)
             Text(alert.message.lineSequence().firstOrNull().orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (!alert.isRead) {
                 Text("未读", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium)
@@ -1130,14 +1689,6 @@ private fun SecurityType.label(): String {
     return when (this) {
         SecurityType.STOCK -> "个股"
         SecurityType.ETF -> "ETF"
-    }
-}
-
-@Composable
-private fun SignalCard(signal: MarketSignal) {
-    CardWithPadding {
-        Text(signal.title, fontWeight = FontWeight.Bold)
-        Text(signal.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

@@ -8,6 +8,8 @@ import com.example.holdingreview.data.repository.DefaultPortfolioRepository
 import com.example.holdingreview.data.repository.DefaultStockMonitorRepository
 import com.example.holdingreview.data.repository.PortfolioRepository
 import com.example.holdingreview.data.repository.StockMonitorRepository
+import com.example.holdingreview.data.seed.PersonalPortfolioSeedDataSource
+import com.example.holdingreview.data.seed.PersonalPortfolioSeedSource
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -35,4 +37,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindKLineRemoteDataSource(dataSource: EastmoneyKLineRemoteDataSource): KLineRemoteDataSource
+
+    @Binds
+    @Singleton
+    abstract fun bindPersonalPortfolioSeedSource(dataSource: PersonalPortfolioSeedDataSource): PersonalPortfolioSeedSource
 }

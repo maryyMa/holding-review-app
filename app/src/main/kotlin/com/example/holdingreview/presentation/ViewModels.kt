@@ -13,12 +13,16 @@ import com.example.holdingreview.domain.model.HoldingInput
 import com.example.holdingreview.domain.model.Market
 import com.example.holdingreview.domain.model.MarketSignal
 import com.example.holdingreview.domain.model.MonitorAlert
+import com.example.holdingreview.domain.model.MonitorAlertLevel
 import com.example.holdingreview.domain.model.MonitorConfig
 import com.example.holdingreview.domain.model.MonitorTarget
 import com.example.holdingreview.domain.model.OcrHoldingDraft
 import com.example.holdingreview.domain.model.PortfolioSnapshot
 import com.example.holdingreview.domain.model.QuoteSnapshot
 import com.example.holdingreview.domain.model.ReviewDraft
+import com.example.holdingreview.domain.model.TradeOperation
+import com.example.holdingreview.domain.model.TradeOperationInput
+import com.example.holdingreview.domain.model.TradeOperationSide
 import com.example.holdingreview.domain.model.WatchStock
 import com.example.holdingreview.domain.model.WatchStockInput
 import com.example.holdingreview.domain.usecase.AnalyzeMarketSignalsUseCase
@@ -46,20 +50,36 @@ import javax.inject.Inject
  * 首页仪表盘的 UI 状态。
  */
 data class HomeUiState(
-    /** 当前组合持仓列表。 */
-    val holdings: List<Holding> = emptyList(),
-    /** 当前关注股票列表。 */
-    val watchStocks: List<WatchStock> = emptyList(),
     /** 聚合后的组合指标。 */
     val snapshot: PortfolioSnapshot = PortfolioSnapshot(),
-    /** 生成的市场和组合异动信号。 */
-    val signals: List<MarketSignal> = emptyList(),
+    /** 监控模块生成的股票预警。 */
+    val alerts: List<MonitorAlert> = emptyList(),
+    /** 当前监控覆盖的股票数量。 */
+    val targetCount: Int = 0,
+    /** 尚未阅读的预警数量。 */
+    val unreadCount: Int = 0,
     /** 最近保存的每日复盘；没有则为空。 */
     val latestReview: DailyReview? = null,
     /** 行情刷新进行中时为 true。 */
     val isRefreshing: Boolean = false,
+    /** 手动监控执行中时为 true。 */
+    val isRunningMonitor: Boolean = false,
     /** 页面显示的一次性消息。 */
     val message: String? = null
+)
+
+private data class HomePortfolioState(
+    val holdings: List<Holding>,
+    val latestReview: DailyReview?,
+    val isRefreshing: Boolean,
+    val message: String?
+)
+
+private data class HomeMonitorState(
+    val alerts: List<MonitorAlert>,
+    val targetCount: Int,
+    val unreadCount: Int,
+    val isRunning: Boolean
 )
 
 /**
@@ -69,40 +89,64 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     /** 提供持仓、关注股票和复盘数据流的仓库。 */
     private val repository: PortfolioRepository,
+    /** 提供监控预警和监控目标。 */
+    private val stockMonitorRepository: StockMonitorRepository,
     /** 计算组合聚合指标。 */
     private val calculatePortfolio: CalculatePortfolioUseCase,
-    /** 构建面向用户的市场异动信号。 */
-    private val analyzeMarketSignals: AnalyzeMarketSignalsUseCase,
     /** 刷新本地缓存的行情数据。 */
-    private val refreshQuotes: RefreshQuotesUseCase
+    private val refreshQuotes: RefreshQuotesUseCase,
+    /** 立即执行一次股票监控。 */
+    private val runStockMonitor: RunStockMonitorUseCase
 ) : ViewModel() {
     /** 通过 [uiState] 暴露的内部刷新状态。 */
     private val isRefreshing = MutableStateFlow(false)
+    /** 通过 [uiState] 暴露的内部监控执行状态。 */
+    private val isRunningMonitor = MutableStateFlow(false)
     /** 通过 [uiState] 暴露的内部消息通道。 */
     private val message = MutableStateFlow<String?>(null)
 
-    /** 首页路由消费的合并后屏幕状态。 */
-    val uiState: StateFlow<HomeUiState> = combine(
+    private val portfolioState = combine(
         repository.observeHoldings(),
-        repository.observeWatchStocks(),
         repository.observeLatestReview(),
         isRefreshing,
         message
-    ) { holdings, watchStocks, latestReview, refreshing, text ->
+    ) { holdings, latestReview, refreshing, text ->
+        HomePortfolioState(holdings, latestReview, refreshing, text)
+    }
+
+    private val monitorState = combine(
+        stockMonitorRepository.observeAlerts(),
+        stockMonitorRepository.observeTargets(),
+        stockMonitorRepository.observeUnreadAlertCount(),
+        isRunningMonitor
+    ) { alerts, targets, unreadCount, running ->
+        HomeMonitorState(
+            alerts = alerts.sortedForDisplay(),
+            targetCount = targets.size,
+            unreadCount = unreadCount,
+            isRunning = running
+        )
+    }
+
+    /** 首页路由消费的合并后屏幕状态。 */
+    val uiState: StateFlow<HomeUiState> = combine(portfolioState, monitorState) { portfolio, monitor ->
         HomeUiState(
-            holdings = holdings,
-            watchStocks = watchStocks,
-            snapshot = calculatePortfolio(holdings),
-            signals = analyzeMarketSignals(holdings, watchStocks),
-            latestReview = latestReview,
-            isRefreshing = refreshing,
-            message = text
+            snapshot = calculatePortfolio(portfolio.holdings),
+            alerts = monitor.alerts,
+            targetCount = monitor.targetCount,
+            unreadCount = monitor.unreadCount,
+            latestReview = portfolio.latestReview,
+            isRefreshing = portfolio.isRefreshing,
+            isRunningMonitor = monitor.isRunning,
+            message = portfolio.message
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState(isRefreshing = true))
 
     init {
         viewModelScope.launch {
-            repository.seedIfEmpty()
+            repository.seedIfEmpty().onFailure {
+                message.value = "个人数据导入失败：${it.message ?: "JSON 格式异常"}"
+            }
         }
     }
 
@@ -118,6 +162,30 @@ class HomeViewModel @Inject constructor(
                 onFailure = { "行情更新失败，显示缓存数据：${it.message ?: "网络异常"}" }
             )
             isRefreshing.value = false
+        }
+    }
+
+    fun runMonitorNow() {
+        viewModelScope.launch {
+            isRunningMonitor.value = true
+            val result = runStockMonitor()
+            message.value = result.fold(
+                onSuccess = { "已检查 ${it.checkedCount} 只股票，新增 ${it.alertCount} 条预警" },
+                onFailure = { "监控执行失败：${it.message ?: "网络异常"}" }
+            )
+            isRunningMonitor.value = false
+        }
+    }
+
+    fun markAllAlertsRead() {
+        viewModelScope.launch {
+            stockMonitorRepository.markAllAlertsRead()
+        }
+    }
+
+    fun clearReadAlerts() {
+        viewModelScope.launch {
+            stockMonitorRepository.clearReadAlerts()
         }
     }
 
@@ -272,6 +340,20 @@ data class WatchListItem(
     val latestPrice: Double?,
     /** 最新日涨跌幅。 */
     val dayChangePercent: Double?,
+    /** 当前市值；未持仓时为空。 */
+    val marketValue: Double?,
+    /** 总盈亏；未持仓时为空。 */
+    val totalProfit: Double?,
+    /** 持仓成本价；未持仓时为空。 */
+    val costPrice: Double?,
+    /** 持仓数量；未持仓时为空。 */
+    val quantity: Double?,
+    /** 当日盈亏；未持仓时为空。 */
+    val dayProfit: Double?,
+    /** 从关注基准收盘价到最新价的涨跌幅；没有关注基准时为空。 */
+    val watchChangePercent: Double?,
+    /** 该股票历史预警数量。 */
+    val alertCount: Int,
     /** 该股票是否已经在持仓中。 */
     val isHolding: Boolean,
     /** 该股票是否也存在于关注列表中。 */
@@ -297,6 +379,8 @@ data class WatchListUiState(
 class WatchListViewModel @Inject constructor(
     /** 用于持久化关注列表的仓库。 */
     private val repository: PortfolioRepository,
+    /** 用于读取每只股票预警数量。 */
+    private val stockMonitorRepository: StockMonitorRepository,
     /** 刷新本地缓存的行情数据。 */
     private val refreshQuotes: RefreshQuotesUseCase
 ) : ViewModel() {
@@ -309,10 +393,12 @@ class WatchListViewModel @Inject constructor(
     val uiState: StateFlow<WatchListUiState> = combine(
         repository.observeHoldings(),
         repository.observeWatchStocks(),
+        stockMonitorRepository.observeAlerts(),
         isRefreshing,
         message
-    ) { holdings, stocks, refreshing, text ->
+    ) { holdings, stocks, alerts, refreshing, text ->
         val watchMap = stocks.associateBy { it.symbol }
+        val alertCounts = alerts.groupingBy { it.symbol }.eachCount()
         val holdingSymbols = holdings.map { it.symbol }.toSet()
         val holdingItems = holdings.map { holding ->
             val watch = watchMap[holding.symbol]
@@ -324,6 +410,13 @@ class WatchListViewModel @Inject constructor(
                 industry = watch?.tags.orEmpty(),
                 latestPrice = holding.currentPrice,
                 dayChangePercent = holding.dayChangePercent,
+                marketValue = holding.marketValue,
+                totalProfit = holding.totalProfit,
+                costPrice = holding.costPrice,
+                quantity = holding.quantity,
+                dayProfit = holding.dayProfit,
+                watchChangePercent = watch?.watchChangePercentFrom(holding.currentPrice),
+                alertCount = alertCounts[holding.symbol] ?: 0,
                 isHolding = true,
                 isWatched = watch != null
             )
@@ -337,6 +430,13 @@ class WatchListViewModel @Inject constructor(
                 industry = stock.tags,
                 latestPrice = stock.latestPrice,
                 dayChangePercent = stock.dayChangePercent,
+                marketValue = null,
+                totalProfit = null,
+                costPrice = null,
+                quantity = null,
+                dayProfit = null,
+                watchChangePercent = stock.watchChangePercentFrom(stock.latestPrice),
+                alertCount = alertCounts[stock.symbol] ?: 0,
                 isHolding = false,
                 isWatched = true
             )
@@ -360,6 +460,7 @@ class WatchListViewModel @Inject constructor(
     fun delete(symbol: String) {
         viewModelScope.launch {
             repository.deleteWatchStock(symbol)
+            stockMonitorRepository.deleteAlertsForSymbol(symbol)
         }
     }
 
@@ -528,7 +629,7 @@ data class MonitorUiState(
 )
 
 /**
- * 股票预警列表和立即监控入口的 ViewModel。
+ * 股票预警列表和立即检查入口的 ViewModel。
  */
 @HiltViewModel
 class MonitorViewModel @Inject constructor(
@@ -546,7 +647,7 @@ class MonitorViewModel @Inject constructor(
         isRunning
     ) { alerts: List<MonitorAlert>, targets: List<MonitorTarget>, configs: List<MonitorConfig>, unreadCount: Int, running: Boolean ->
         MonitorUiState(
-            alerts = alerts,
+            alerts = alerts.sortedForDisplay(),
             targets = targets,
             configs = configs.associateBy { it.symbol },
             unreadCount = unreadCount,
@@ -582,10 +683,166 @@ class MonitorViewModel @Inject constructor(
 }
 
 /**
+ * 关注页单只股票预警列表状态。
+ */
+data class WatchAlertsUiState(
+    val symbol: String = "",
+    val holding: Holding? = null,
+    val watchStock: WatchStock? = null,
+    val target: MonitorTarget? = null,
+    val config: MonitorConfig? = null,
+    val alerts: List<MonitorAlert> = emptyList(),
+    val operations: List<TradeOperation> = emptyList()
+)
+
+private data class WatchPortfolioDetailState(
+    val holding: Holding?,
+    val watchStock: WatchStock?,
+    val operations: List<TradeOperation>
+)
+
+private data class WatchMonitorDetailState(
+    val target: MonitorTarget?,
+    val config: MonitorConfig?,
+    val alerts: List<MonitorAlert>
+)
+
+/**
+ * 根据股票代码展示该股票对应的全部预警。
+ */
+@HiltViewModel
+class WatchAlertsViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
+    private val repository: PortfolioRepository,
+    private val stockMonitorRepository: StockMonitorRepository
+) : ViewModel() {
+    private val symbol: String = savedStateHandle["symbol"] ?: ""
+
+    private val portfolioState = combine(
+        repository.observeHoldings(),
+        repository.observeWatchStocks(),
+        repository.observeTradeOperations(symbol)
+    ) { holdings, watchStocks, operations ->
+        WatchPortfolioDetailState(
+            holding = holdings.firstOrNull { it.symbol == symbol },
+            watchStock = watchStocks.firstOrNull { it.symbol == symbol },
+            operations = operations
+        )
+    }
+
+    private val monitorState = combine(
+        stockMonitorRepository.observeAlerts(),
+        stockMonitorRepository.observeTargets(),
+        stockMonitorRepository.observeConfig(symbol)
+    ) { alerts, targets, config ->
+        WatchMonitorDetailState(
+            target = targets.firstOrNull { it.symbol == symbol },
+            config = config,
+            alerts = alerts.filter { it.symbol == symbol }.sortedForDisplay()
+        )
+    }
+
+    val uiState: StateFlow<WatchAlertsUiState> = combine(portfolioState, monitorState) { portfolio, monitor ->
+        WatchAlertsUiState(
+            symbol = symbol,
+            holding = portfolio.holding,
+            watchStock = portfolio.watchStock,
+            target = monitor.target,
+            config = monitor.config,
+            alerts = monitor.alerts,
+            operations = portfolio.operations
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WatchAlertsUiState(symbol = symbol))
+
+    fun clearReadAlerts() {
+        viewModelScope.launch {
+            stockMonitorRepository.clearReadAlerts(symbol)
+        }
+    }
+}
+
+data class TradeOperationFormUiState(
+    val symbol: String = "",
+    val holding: Holding? = null,
+    val latestPrice: Double? = null,
+    val isSaving: Boolean = false,
+    val message: String? = null
+)
+
+@HiltViewModel
+class TradeOperationFormViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
+    private val repository: PortfolioRepository
+) : ViewModel() {
+    private val symbol: String = savedStateHandle["symbol"] ?: ""
+    private val isSaving = MutableStateFlow(false)
+    private val message = MutableStateFlow<String?>(null)
+
+    val uiState: StateFlow<TradeOperationFormUiState> = combine(
+        repository.observeHoldings(),
+        repository.observeQuotes(),
+        isSaving,
+        message
+    ) { holdings, quotes, saving, text ->
+        val holding = holdings.firstOrNull { it.symbol == symbol }
+        val quote = quotes.firstOrNull { it.symbol == symbol }
+        TradeOperationFormUiState(
+            symbol = symbol,
+            holding = holding,
+            latestPrice = quote?.latestPrice ?: holding?.currentPrice,
+            isSaving = saving,
+            message = text
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TradeOperationFormUiState(symbol = symbol))
+
+    fun save(
+        side: TradeOperationSide,
+        quantityText: String,
+        priceText: String,
+        occurredAtMillis: Long,
+        note: String,
+        onSaved: () -> Unit
+    ) {
+        val quantity = quantityText.toDoubleOrNull()
+        val price = priceText.toDoubleOrNull()
+        if (symbol.length != 6 || quantity == null || quantity <= 0 || price == null || price <= 0) {
+            message.value = "请检查数量和价格"
+            return
+        }
+        viewModelScope.launch {
+            isSaving.value = true
+            val result = repository.addTradeOperation(
+                TradeOperationInput(
+                    symbol = symbol,
+                    side = side,
+                    quantity = quantity,
+                    price = price,
+                    occurredAtMillis = occurredAtMillis,
+                    note = note
+                )
+            )
+            isSaving.value = false
+            result.fold(
+                onSuccess = {
+                    message.value = "操作已保存"
+                    onSaved()
+                },
+                onFailure = { message.value = it.message ?: "操作保存失败" }
+            )
+        }
+    }
+
+    fun clearMessage() {
+        message.value = null
+    }
+}
+
+/**
  * 预警详情页状态。
  */
 data class MonitorDetailUiState(
-    val alert: MonitorAlert? = null
+    val alert: MonitorAlert? = null,
+    val isLoaded: Boolean = false
 )
 
 /**
@@ -598,7 +855,7 @@ class MonitorDetailViewModel @Inject constructor(
 ) : ViewModel() {
     private val alertId: String = savedStateHandle["alertId"] ?: ""
     val uiState: StateFlow<MonitorDetailUiState> = repository.observeAlert(alertId)
-        .map { MonitorDetailUiState(alert = it) }
+        .map { MonitorDetailUiState(alert = it, isLoaded = true) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MonitorDetailUiState())
 
     fun markRead() {
@@ -645,6 +902,27 @@ class MonitorSettingsViewModel @Inject constructor(
     fun clearMessage() {
         message.value = null
     }
+}
+
+private fun List<MonitorAlert>.sortedForDisplay(): List<MonitorAlert> {
+    return sortedWith(
+        compareBy<MonitorAlert> { it.level.displayOrder() }
+            .thenByDescending { it.triggeredAtMillis }
+    )
+}
+
+private fun MonitorAlertLevel.displayOrder(): Int {
+    return when (this) {
+        MonitorAlertLevel.CRITICAL -> 0
+        MonitorAlertLevel.WARNING -> 1
+        MonitorAlertLevel.INFO -> 2
+    }
+}
+
+private fun WatchStock.watchChangePercentFrom(latestPrice: Double?): Double? {
+    val baseClose = watchBaseClose?.takeIf { it > 0 } ?: return null
+    val latest = latestPrice ?: return null
+    return (latest - baseClose) / baseClose * 100
 }
 
 data class OcrDraftForm(

@@ -33,4 +33,7 @@ interface StockMonitorRepository {
     suspend fun insertAlerts(alerts: List<MonitorAlert>)
     suspend fun markAlertRead(id: String)
     suspend fun markAllAlertsRead()
+    suspend fun clearReadAlerts()
+    suspend fun clearReadAlerts(symbol: String)
+    suspend fun deleteAlertsForSymbol(symbol: String)
 }

@@ -112,13 +112,27 @@ data class WatchStock(
     val reason: String,
     /** 用于分组关注想法的自由标签。 */
     val tags: String,
+    /** 用户首次加入关注列表的时间，单位为 epoch 毫秒。 */
+    val watchedAtMillis: Long,
+    /** 加入关注时对应交易日的收盘价；尚未能确认收盘价时为空。 */
+    val watchBaseClose: Double?,
+    /** [watchBaseClose] 对应的 yyyy-MM-dd 交易日。 */
+    val watchBaseCloseDate: String?,
     /** 最新已知行情价格；刷新前为空。 */
     val latestPrice: Double?,
     /** 最新日涨跌幅；刷新前为空。 */
     val dayChangePercent: Double?,
     /** 最近本地更新时间，单位为 epoch 毫秒。 */
     val updatedAtMillis: Long
-)
+) {
+    /** 从关注基准收盘价到最新价格的累计涨跌幅。 */
+    val watchChangePercent: Double?
+        get() {
+            val baseClose = watchBaseClose?.takeIf { it > 0 } ?: return null
+            val latest = latestPrice ?: return null
+            return (latest - baseClose) / baseClose * 100
+        }
+}
 
 /**
  * 用于添加或更新单个关注股票的可编辑输入。
@@ -134,6 +148,41 @@ data class WatchStockInput(
     val reason: String,
     /** 用户自定义标签。 */
     val tags: String
+)
+
+enum class TradeOperationSide {
+    BUY,
+    SELL
+}
+
+/**
+ * 用户记录的一笔买入或卖出操作。
+ */
+data class TradeOperation(
+    val id: String,
+    val symbol: String,
+    val side: TradeOperationSide,
+    val quantity: Double,
+    val price: Double,
+    val fee: Double,
+    val occurredAtMillis: Long,
+    val note: String,
+    val realizedProfit: Double?,
+    val createdAtMillis: Long
+) {
+    val amount: Double = quantity * price
+}
+
+/**
+ * 保存交易操作前收集的表单输入。
+ */
+data class TradeOperationInput(
+    val symbol: String,
+    val side: TradeOperationSide,
+    val quantity: Double,
+    val price: Double,
+    val occurredAtMillis: Long,
+    val note: String
 )
 
 /**

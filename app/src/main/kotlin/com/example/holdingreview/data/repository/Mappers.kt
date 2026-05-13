@@ -6,6 +6,7 @@ import com.example.holdingreview.data.local.entities.KLineCacheEntity
 import com.example.holdingreview.data.local.entities.MonitorAlertEntity
 import com.example.holdingreview.data.local.entities.MonitorConfigEntity
 import com.example.holdingreview.data.local.entities.QuoteSnapshotEntity
+import com.example.holdingreview.data.local.entities.TradeOperationEntity
 import com.example.holdingreview.data.local.entities.WatchStockEntity
 import com.example.holdingreview.data.remote.RemoteQuote
 import com.example.holdingreview.domain.model.DailyReview
@@ -18,6 +19,8 @@ import com.example.holdingreview.domain.model.MonitorAlertType
 import com.example.holdingreview.domain.model.MonitorConfig
 import com.example.holdingreview.domain.model.QuoteSnapshot
 import com.example.holdingreview.domain.model.SecurityType
+import com.example.holdingreview.domain.model.TradeOperation
+import com.example.holdingreview.domain.model.TradeOperationSide
 import com.example.holdingreview.domain.model.WatchStock
 
 /**
@@ -48,6 +51,9 @@ fun WatchStockEntity.toDomain(quote: QuoteSnapshotEntity?): WatchStock {
         market = Market.fromSymbol(symbol).takeUnless { it == Market.UNKNOWN } ?: market.toMarket(),
         reason = reason,
         tags = tags,
+        watchedAtMillis = watchedAtMillis,
+        watchBaseClose = watchBaseClose,
+        watchBaseCloseDate = watchBaseCloseDate,
         latestPrice = quote?.latestPrice,
         dayChangePercent = quote?.changePercent,
         updatedAtMillis = updatedAtMillis
@@ -114,6 +120,36 @@ fun DailyReview.toEntity(): DailyReviewEntity {
         tradeDate = tradeDate,
         summary = summary,
         aiPrompt = aiPrompt,
+        createdAtMillis = createdAtMillis
+    )
+}
+
+fun TradeOperationEntity.toDomain(): TradeOperation {
+    return TradeOperation(
+        id = id,
+        symbol = symbol,
+        side = side.toTradeOperationSide(),
+        quantity = quantity,
+        price = price,
+        fee = fee,
+        occurredAtMillis = occurredAtMillis,
+        note = note,
+        realizedProfit = realizedProfit,
+        createdAtMillis = createdAtMillis
+    )
+}
+
+fun TradeOperation.toEntity(): TradeOperationEntity {
+    return TradeOperationEntity(
+        id = id,
+        symbol = symbol,
+        side = side.name,
+        quantity = quantity,
+        price = price,
+        fee = fee,
+        occurredAtMillis = occurredAtMillis,
+        note = note,
+        realizedProfit = realizedProfit,
         createdAtMillis = createdAtMillis
     )
 }
@@ -267,3 +303,6 @@ private fun String.toMonitorAlertLevel(): MonitorAlertLevel =
 
 private fun String.toMonitorAlertType(): MonitorAlertType =
     runCatching { MonitorAlertType.valueOf(this) }.getOrDefault(MonitorAlertType.CHANGE_RISE)
+
+private fun String.toTradeOperationSide(): TradeOperationSide =
+    runCatching { TradeOperationSide.valueOf(this) }.getOrDefault(TradeOperationSide.BUY)

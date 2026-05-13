@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-05-12",
+  "holdings": [
+    {
+      "symbol": "600519",
+      "name": "贵州茅台",
+      "market": "SH",
+      "quantity": 100.0,
+      "costPrice": 1560.0,
+      "manualCurrentPrice": 1586.3,
+      "note": "核心观察仓"
+    }
+  ],
+  "watchStocks": [
+    {
+      "symbol": "688981",
+      "name": "中芯国际",
+      "market": "SH",
+      "reason": "观察半导体板块异动",
+      "industry": "半导体,科技",
+      "watchBaseClose": null,
+      "watchBaseCloseDate": null
+    }
+  ],
+  "monitorConfigs": [
+    {
+      "symbol": "600519",
+      "enabled": true,
+      "costProfitPercent": 8.0,
+      "costLossPercent": -5.0,
+      "changePercent": 3.0,
+      "volumeSurgeMultiplier": 2.0,
+      "volumeShrinkMultiplier": 0.5,
+      "rsiHigh": 75.0,
+      "rsiLow": 25.0,
+      "gapPercent": 2.5,
+      "trailingProfitStartPercent": 10.0,
+      "trailingWarningDrawdownPercent": 3.0,
+      "trailingCriticalDrawdownPercent": 6.0
+    }
+  ]
+}

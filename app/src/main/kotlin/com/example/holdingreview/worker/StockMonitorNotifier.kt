@@ -26,17 +26,20 @@ class StockMonitorNotifier @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     fun notify(alerts: List<MonitorAlert>) {
-        if (alerts.isEmpty()) return
+        val pushAlerts = alerts
+            .filter { it.level == MonitorAlertLevel.CRITICAL || it.level == MonitorAlertLevel.WARNING }
+            .take(5)
+        if (pushAlerts.isEmpty()) return
         ensureChannel()
         if (!canPostNotifications()) return
         val manager = NotificationManagerCompat.from(context)
-        alerts.take(5).forEach { alert ->
+        pushAlerts.forEach { alert ->
             val notification = NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle(alert.title)
                 .setContentText(alert.message.lineSequence().firstOrNull().orEmpty())
                 .setStyle(NotificationCompat.BigTextStyle().bigText(alert.message))
-                .setContentIntent(openAppIntent())
+                .setContentIntent(openAppIntent(alert.id))
                 .setAutoCancel(true)
                 .setPriority(if (alert.level == MonitorAlertLevel.CRITICAL) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
                 .build()
@@ -57,11 +60,14 @@ class StockMonitorNotifier @Inject constructor(
         manager.createNotificationChannel(channel)
     }
 
-    private fun openAppIntent(): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java)
+    private fun openAppIntent(alertId: String): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_ALERT_ID, alertId)
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
         return PendingIntent.getActivity(
             context,
-            0,
+            alertId.hashCode(),
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )

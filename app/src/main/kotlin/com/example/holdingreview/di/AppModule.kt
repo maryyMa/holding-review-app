@@ -9,6 +9,7 @@ import com.example.holdingreview.data.local.dao.KLineCacheDao
 import com.example.holdingreview.data.local.dao.MonitorAlertDao
 import com.example.holdingreview.data.local.dao.MonitorConfigDao
 import com.example.holdingreview.data.local.dao.QuoteSnapshotDao
+import com.example.holdingreview.data.local.dao.TradeOperationDao
 import com.example.holdingreview.data.local.dao.WatchStockDao
 import com.example.holdingreview.data.remote.EastmoneyKLineApi
 import com.example.holdingreview.data.remote.TencentQuoteApi
@@ -39,7 +40,7 @@ object AppModule {
             context,
             HoldingReviewDatabase::class.java,
             "holding_review.db"
-        ).fallbackToDestructiveMigration()
+        ).addMigrations(HoldingReviewDatabase.MIGRATION_2_3, HoldingReviewDatabase.MIGRATION_3_4)
             .build()
     }
 
@@ -59,6 +60,10 @@ object AppModule {
      * 从 Room 数据库提供每日复盘 DAO。
      */
     @Provides fun provideDailyReviewDao(database: HoldingReviewDatabase): DailyReviewDao = database.dailyReviewDao()
+    /**
+     * 从 Room 数据库提供交易操作 DAO。
+     */
+    @Provides fun provideTradeOperationDao(database: HoldingReviewDatabase): TradeOperationDao = database.tradeOperationDao()
     /**
      * 从 Room 数据库提供监控配置 DAO。
      */

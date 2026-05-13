@@ -8,6 +8,8 @@ import com.example.holdingreview.domain.model.HoldingInput
 import com.example.holdingreview.domain.model.Market
 import com.example.holdingreview.domain.model.OcrHoldingDraft
 import com.example.holdingreview.domain.model.QuoteSnapshot
+import com.example.holdingreview.domain.model.TradeOperation
+import com.example.holdingreview.domain.model.TradeOperationInput
 import com.example.holdingreview.domain.model.WatchStock
 import com.example.holdingreview.domain.model.WatchStockInput
 import com.example.holdingreview.domain.usecase.LookupQuoteUseCase
@@ -151,6 +153,8 @@ class HoldingEditViewModelTest {
 
         override fun observeWatchStocks(): Flow<List<WatchStock>> = flowOf(emptyList())
 
+        override fun observeTradeOperations(symbol: String): Flow<List<TradeOperation>> = flowOf(emptyList())
+
         override fun observeQuotes(): Flow<List<QuoteSnapshot>> = flowOf(emptyList())
 
         override fun observeLatestReview(): Flow<DailyReview?> = flowOf(null)
@@ -160,7 +164,7 @@ class HoldingEditViewModelTest {
             return lookupResult
         }
 
-        override suspend fun seedIfEmpty() = Unit
+        override suspend fun seedIfEmpty(): Result<Boolean> = Result.success(false)
 
         override suspend fun upsertHolding(input: HoldingInput) = Unit
 
@@ -171,6 +175,9 @@ class HoldingEditViewModelTest {
         override suspend fun upsertWatchStock(input: WatchStockInput) = Unit
 
         override suspend fun deleteWatchStock(symbol: String) = Unit
+
+        override suspend fun addTradeOperation(input: TradeOperationInput): Result<TradeOperation> =
+            Result.failure(UnsupportedOperationException("not configured"))
 
         override suspend fun refreshQuotes(): Result<Int> = Result.success(0)
 

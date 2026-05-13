@@ -159,6 +159,18 @@ class DefaultStockMonitorRepository @Inject constructor(
         monitorAlertDao.markAllRead()
     }
 
+    override suspend fun clearReadAlerts() {
+        monitorAlertDao.deleteRead()
+    }
+
+    override suspend fun clearReadAlerts(symbol: String) {
+        monitorAlertDao.deleteReadBySymbol(symbol.trim())
+    }
+
+    override suspend fun deleteAlertsForSymbol(symbol: String) {
+        monitorAlertDao.deleteBySymbol(symbol.trim())
+    }
+
     private fun buildTargets(
         holdings: List<com.example.holdingreview.data.local.entities.HoldingEntity>,
         watches: List<com.example.holdingreview.data.local.entities.WatchStockEntity>,
