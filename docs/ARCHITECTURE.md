@@ -58,7 +58,9 @@ Room 当前版本为 v4，主要表：
 
 ## 内置个人数据
 
-应用启动时会尝试读取 `app/src/main/assets/personal_portfolio.local.json`。如果文件存在且持仓/关注表为空，则导入持仓、关注股和监控配置；如果本地已有数据，则跳过导入，避免覆盖用户在 App 内维护的数据。
+应用启动时会尝试读取 `app/src/main/assets/personal_portfolio.local.json`。如果文件存在，则补充数据库里还没有的持仓、关注股，并在存在 `monitorConfigs` 时补充缺失的监控配置；已有记录不会被覆盖，避免改掉用户在 App 内维护的数据。
+
+个人 JSON 保持最小录入：持仓只写股票代码、持仓数量、成本价和备注；关注股只写股票代码、关注原因和行业。导入时会按股票代码批量查询行情，用接口结果补全股票名称、市场和现价；行情查询失败时用股票代码和成本价兜底。`monitorConfigs` 是可选高级字段，不写时使用默认监控规则。
 
 真实个人数据文件已加入 `.gitignore`。可提交的模板是 `docs/personal_portfolio.example.json`。
 

@@ -176,9 +176,11 @@ class WatchViewModelTest {
 
         assertEquals("贵州茅台", viewModel.uiState.value.quote?.name)
         assertEquals("白酒", viewModel.uiState.value.suggestedIndustry)
-        assertTrue(viewModel.save("600519", "", "核心观察", ""))
+        var saved = false
+        viewModel.save("600519", "", "核心观察", "") { saved = true }
         advanceUntilIdle()
 
+        assertTrue(saved)
         assertNotNull(repository.savedWatchStock)
         assertEquals("贵州茅台", repository.savedWatchStock?.name)
         assertEquals("白酒", repository.savedWatchStock?.tags)
@@ -203,9 +205,11 @@ class WatchViewModelTest {
 
         assertNull(viewModel.uiState.value.quote)
         assertTrue(viewModel.uiState.value.allowManualNameInput)
-        assertTrue(viewModel.save("600519", "手填股票", "临时观察", "新能源"))
+        var saved = false
+        viewModel.save("600519", "手填股票", "临时观察", "新能源") { saved = true }
         advanceUntilIdle()
 
+        assertTrue(saved)
         assertEquals("手填股票", repository.savedWatchStock?.name)
         assertEquals("新能源", repository.savedWatchStock?.tags)
         collectJob.cancel()

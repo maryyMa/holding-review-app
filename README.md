@@ -1,6 +1,6 @@
-# 持仓复盘 App
+# 股票复盘 App
 
-持仓复盘 App 是一个面向个人投资者的 Android 本地应用，用于记录持仓、跟踪关注股票、查看监控预警、导入券商截图，并生成每日复盘内容。项目重点放在端侧数据闭环：本地持久化、行情刷新、预警监控、OCR 识别确认、交易操作记录和复盘生成。
+股票复盘 App 是一个面向个人投资者的 Android 本地应用，用于记录持仓、跟踪关注股票、查看监控预警、导入券商截图，并生成每日复盘内容。项目重点放在端侧数据闭环：本地持久化、行情刷新、预警监控、OCR 识别确认、交易操作记录和复盘生成。
 
 ## 技术栈
 
@@ -32,6 +32,8 @@ Android 配置：
 - 预警排序规则：严重、警告、提示；同级按触发时间从新到旧。
 - 支持一键全部已读、清除已读、立即检查。
 - 已读预警弱化显示，便于区分新旧信息。
+
+![首页](docs/重命名.png)
 
 ### 关注
 
@@ -76,12 +78,10 @@ Android 配置：
 ### 内置个人数据
 
 - 可在本地维护 `app/src/main/assets/personal_portfolio.local.json`。
-- 该文件只在数据库为空时导入，不覆盖 App 内已有数据。
+- 启动时会补充数据库里还没有的股票，不覆盖 App 内已有持仓、关注和监控配置。
 - 支持初始化持仓、关注股和监控配置。
-- `personal_portfolio.local.json` 已加入 `.gitignore`，避免提交真实个人数据。
-- JSON 模板见 [docs/personal_portfolio.example.json](docs/personal_portfolio.example.json)。
 
-### OCR 截图导入
+### OCR 截图导入(todo 还没完成)
 
 - 使用系统 Photo Picker 选择券商持仓截图。
 - 使用 ML Kit 中文 OCR 识别截图文字。
@@ -125,7 +125,6 @@ Android 配置：
 - [项目说明](docs/PROJECT_OVERVIEW.md)
 - [手动测试清单](docs/MANUAL_TEST_CHECKLIST.md)
 - [个人数据 JSON 模板](docs/personal_portfolio.example.json)
-- [开发提示词记录](docs/VIBE_CODING_PROMPTS.md)
 
 ## 边界说明
 

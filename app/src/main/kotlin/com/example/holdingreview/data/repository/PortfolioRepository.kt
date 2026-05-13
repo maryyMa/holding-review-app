@@ -45,7 +45,7 @@ interface PortfolioRepository {
     suspend fun lookupQuote(symbol: String): Result<QuoteSnapshot>
 
     /**
-     * 本地数据库为空时导入内置个人数据；没有内置数据时写入演示数据。
+     * 导入内置个人数据里本地缺失的记录；没有内置数据且数据库为空时写入演示数据。
      */
     suspend fun seedIfEmpty(): Result<Boolean>
     /**

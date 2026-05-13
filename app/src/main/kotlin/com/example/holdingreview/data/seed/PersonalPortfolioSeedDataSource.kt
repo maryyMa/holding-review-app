@@ -1,7 +1,6 @@
 package com.example.holdingreview.data.seed
 
 import android.content.Context
-import com.example.holdingreview.domain.model.Market
 import dagger.hilt.android.qualifiers.ApplicationContext
 import org.json.JSONObject
 import java.io.FileNotFoundException
@@ -32,23 +31,16 @@ class PersonalPortfolioSeedDataSource @Inject constructor(
             holdings = root.optJSONArray("holdings").toList { item ->
                 PersonalHoldingSeed(
                     symbol = item.requiredSymbol(),
-                    name = item.optText("name") ?: item.requiredSymbol(),
-                    market = item.optMarket("market", item.requiredSymbol()),
                     quantity = item.getDouble("quantity"),
                     costPrice = item.getDouble("costPrice"),
-                    manualCurrentPrice = item.getDouble("manualCurrentPrice"),
                     note = item.optText("note").orEmpty()
                 )
             },
             watchStocks = root.optJSONArray("watchStocks").toList { item ->
                 PersonalWatchStockSeed(
                     symbol = item.requiredSymbol(),
-                    name = item.optText("name") ?: item.requiredSymbol(),
-                    market = item.optMarket("market", item.requiredSymbol()),
                     reason = item.optText("reason").orEmpty(),
-                    industry = item.optText("industry").orEmpty(),
-                    watchBaseClose = item.optDoubleOrNull("watchBaseClose"),
-                    watchBaseCloseDate = item.optText("watchBaseCloseDate")
+                    industry = item.optText("industry").orEmpty()
                 )
             },
             monitorConfigs = root.optJSONArray("monitorConfigs").toList { item ->
@@ -85,13 +77,6 @@ class PersonalPortfolioSeedDataSource @Inject constructor(
         return if (has(name) && !isNull(name)) getDouble(name) else null
     }
 
-    private fun JSONObject.optMarket(name: String, symbol: String): Market {
-        val value = optText(name) ?: return Market.fromSymbol(symbol)
-        return runCatching { Market.valueOf(value) }.getOrElse {
-            throw IllegalArgumentException("不支持的市场：$value")
-        }
-    }
-
     private fun <T> org.json.JSONArray?.toList(mapper: (JSONObject) -> T): List<T> {
         if (this == null) return emptyList()
         return List(length()) { index -> mapper(getJSONObject(index)) }
@@ -114,22 +99,15 @@ data class PersonalPortfolioSeed(
 
 data class PersonalHoldingSeed(
     val symbol: String,
-    val name: String,
-    val market: Market,
     val quantity: Double,
     val costPrice: Double,
-    val manualCurrentPrice: Double,
     val note: String
 )
 
 data class PersonalWatchStockSeed(
     val symbol: String,
-    val name: String,
-    val market: Market,
     val reason: String,
-    val industry: String,
-    val watchBaseClose: Double?,
-    val watchBaseCloseDate: String?
+    val industry: String
 )
 
 data class PersonalMonitorConfigSeed(

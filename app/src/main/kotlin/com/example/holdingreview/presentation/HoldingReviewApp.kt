@@ -4,23 +4,23 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import androidx.compose.foundation.border
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.ImageSearch
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
@@ -37,6 +38,8 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -65,7 +68,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -240,7 +242,7 @@ private fun HomeRoute(
                         .weight(1f)
                         .height(AlertActionButtonHeight)
                 ) {
-                    Icon(Icons.Filled.Refresh, contentDescription = null)
+//                    Icon(Icons.Filled.Refresh, contentDescription = null)
                     Spacer(Modifier.width(4.dp))
                     AlertActionText(if (state.isRunningMonitor) "检查中" else "立即检查")
                 }
@@ -307,7 +309,7 @@ fun HoldingReviewApp(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("持仓复盘") },
+                title = { Text("股票复盘") },
                 actions = {
                     when (currentRoute) {
                         Routes.WATCH -> {
@@ -559,15 +561,13 @@ private fun WatchListRoute(
         if (state.items.isEmpty()) {
             item { EmptyText("暂无持仓或关注股票") }
         } else {
-            item {
-                WatchStockTable(
-                    items = state.items,
-                    onOpenAlerts = onOpenAlerts,
-                    onDelete = viewModel::delete
-                )
-            }
+            WatchStockCardList(
+                stocks = state.items,
+                onOpenAlerts = onOpenAlerts,
+                onDelete = viewModel::delete
+            )
         }
-        item { Spacer(Modifier.height(12.dp)) }
+        item { Spacer(Modifier.height(72.dp)) }
     }
 }
 
@@ -586,6 +586,8 @@ private fun WatchAlertsRoute(
         ?: state.watchStock?.market?.displayName
         ?: state.target?.market?.displayName
         ?: "--"
+    val latestAlerts = state.alerts.take(5)
+    val showWatchInfo = state.hasVisibleWatchInfo(latestPrice)
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -618,9 +620,11 @@ private fun WatchAlertsRoute(
             SectionTitle("持仓指标")
             HoldingMetricsCard(state.holding)
         }
-        item {
-            SectionTitle("关注信息")
-            WatchInfoCard(state = state, latestPrice = latestPrice)
+        if (showWatchInfo) {
+            item {
+                SectionTitle("关注信息")
+                WatchInfoCard(state = state, latestPrice = latestPrice)
+            }
         }
         item {
             SectionTitle("监控状态")
@@ -628,25 +632,16 @@ private fun WatchAlertsRoute(
         }
         item {
             SectionTitle("预警记录")
-            FilledTonalButton(
-                onClick = viewModel::clearReadAlerts,
-                enabled = state.alerts.any { it.isRead },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("清除已读")
-            }
         }
-        if (state.alerts.isEmpty()) {
+        if (latestAlerts.isEmpty()) {
             item { EmptyText("这只股票暂无预警记录。") }
         } else {
-            items(state.alerts, key = { it.id }) { alert ->
+            items(latestAlerts, key = { it.id }) { alert ->
                 MonitorAlertCard(alert, onClick = { onOpenAlert(alert.id) })
             }
         }
-        item { SectionTitle("操作记录") }
-        if (state.operations.isEmpty()) {
-            item { EmptyText("暂无买入或卖出操作记录。") }
-        } else {
+        if (state.operations.isNotEmpty()) {
+            item { SectionTitle("操作记录") }
             items(state.operations, key = { it.id }) { operation ->
                 TradeOperationCard(operation)
             }
@@ -680,24 +675,37 @@ private fun HoldingMetricsCard(holding: Holding?) {
 
 @Composable
 private fun WatchInfoCard(state: WatchAlertsUiState, latestPrice: Double?) {
-    val watch = state.watchStock
+    val watch = state.watchStock ?: return
+    val change = watchChangePercent(watch.watchBaseClose, latestPrice)
     CardWithPadding {
-        if (watch == null) {
-            Text("这只股票来自持仓列表，尚未单独加入关注。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        } else {
-            Text("关注原因：${watch.reason.ifBlank { "--" }}")
-            Text("行业：${watch.tags.ifBlank { "--" }}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (watch.reason.isNotBlank()) {
+            Text("关注原因：${watch.reason}")
+        }
+        if (watch.tags.isNotBlank()) {
+            Text("行业：${watch.tags}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (watch.watchBaseClose != null || watch.watchBaseCloseDate != null) {
             Text(
                 "关注基准：${watch.watchBaseClose?.let { money(it) } ?: "--"} · ${watch.watchBaseCloseDate ?: "--"}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            val change = watchChangePercent(watch.watchBaseClose, latestPrice)
+        }
+        if (change != null) {
             Text(
-                "关注后涨幅：${change?.let { signedPercent(it) } ?: "--"}",
+                "关注后涨幅：${signedPercent(change)}",
                 color = change.changeColor()
             )
         }
     }
+}
+
+private fun WatchAlertsUiState.hasVisibleWatchInfo(latestPrice: Double?): Boolean {
+    val watch = watchStock ?: return false
+    return watch.reason.isNotBlank() ||
+        watch.tags.isNotBlank() ||
+        watch.watchBaseClose != null ||
+        watch.watchBaseCloseDate != null ||
+        watchChangePercent(watch.watchBaseClose, latestPrice) != null
 }
 
 @Composable
@@ -869,7 +877,6 @@ private fun WatchEditRoute(
     var reason by remember { mutableStateOf("") }
     var industry by remember { mutableStateOf("") }
     var industryTouched by remember { mutableStateOf(false) }
-    var message by remember { mutableStateOf<String?>(null) }
     val normalizedSymbol = symbol.trim()
     val quote = state.quote?.takeIf { it.symbol == normalizedSymbol }
 
@@ -894,7 +901,7 @@ private fun WatchEditRoute(
     ) {
         item {
             SectionTitle("添加关注")
-            MessageBanner(message) { message = null }
+            MessageBanner(state.message, viewModel::clearMessage)
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = symbol,
@@ -949,19 +956,14 @@ private fun WatchEditRoute(
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                     Button(
                         onClick = {
-                            val saved = viewModel.save(symbol, name, reason, industry)
-                            if (saved) {
-                                onDone()
-                            } else {
-                                message = "请检查股票代码和股票名称"
-                            }
+                            viewModel.save(symbol, name, reason, industry, onDone)
                         },
-                        enabled = !state.isLookingUp,
+                        enabled = !state.isLookingUp && !state.isSaving,
                         modifier = Modifier.weight(1f)
                     ) {
                         Icon(Icons.Filled.Save, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
-                        Text("保存")
+                        Text(if (state.isSaving) "保存中" else "保存")
                     }
                     FilledTonalButton(onClick = onDone, modifier = Modifier.weight(1f)) {
                         Text("取消")
@@ -1411,99 +1413,217 @@ private fun HoldingCard(holding: Holding, onClick: () -> Unit) {
 }
 
 /**
- * 以横向滚动表格展示持仓和关注股票。
+ * 以更适合手机浏览的卡片列表展示持仓和关注股票。
  */
-@Composable
-private fun WatchStockTable(
-    items: List<WatchListItem>,
+private fun LazyListScope.WatchStockCardList(
+    stocks: List<WatchListItem>,
     onOpenAlerts: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
-    val scrollState = rememberScrollState()
-    Column(Modifier.horizontalScroll(scrollState)) {
-        WatchTableHeader()
-        items.forEach { stock ->
-            WatchTableRow(stock, onOpenAlerts = onOpenAlerts, onDelete = onDelete)
-        }
+    items(items = stocks, key = { it.symbol }) { stock ->
+        WatchStockCard(stock = stock, onOpenAlerts = onOpenAlerts, onDelete = onDelete)
     }
 }
 
 @Composable
-private fun WatchTableHeader() {
-    Row {
-        WatchTableCell("股票/市值", WatchTableWidths.name, isHeader = true)
-        WatchTableCell("盈亏", WatchTableWidths.money, isHeader = true)
-        WatchTableCell("成本/现价", WatchTableWidths.money, isHeader = true)
-        WatchTableCell("持仓数量", WatchTableWidths.quantity, isHeader = true)
-        WatchTableCell("当日盈亏", WatchTableWidths.money, isHeader = true)
-        WatchTableCell("关注后涨幅", WatchTableWidths.percent, isHeader = true)
-        WatchTableCell("预警数量", WatchTableWidths.count, isHeader = true)
-        WatchTableCell("行业", WatchTableWidths.industry, isHeader = true)
-    }
-}
-
-@Composable
-private fun WatchTableRow(
+private fun WatchStockCard(
     stock: WatchListItem,
     onOpenAlerts: (String) -> Unit,
     onDelete: (String) -> Unit
 ) {
-    val profitColor = stock.totalProfit.changeColor()
+    var menuExpanded by remember { mutableStateOf(false) }
+    val primaryLabel = if (stock.isHolding) "累计盈亏" else "关注后涨幅"
+    val primaryValue = if (stock.isHolding) {
+        stock.totalProfit?.let { signedMoney(it) } ?: "--"
+    } else {
+        stock.watchChangePercent?.let { signedPercent(it) } ?: "--"
+    }
+    val primaryColor = if (stock.isHolding) {
+        stock.totalProfit.changeColor()
+    } else {
+        stock.watchChangePercent.changeColor()
+    }
+    val dayChangeColor = stock.dayChangePercent.changeColor()
     val dayProfitColor = stock.dayProfit.changeColor()
     val watchChangeColor = stock.watchChangePercent.changeColor()
-    Row(
-        modifier = Modifier.clickable { onOpenAlerts(stock.symbol) },
-        verticalAlignment = Alignment.CenterVertically
+    val alertContainer = if (stock.alertCount > 0) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val alertContent = if (stock.alertCount > 0) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Card(
+        onClick = { onOpenAlerts(stock.symbol) },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
-        WatchTableCell(WatchTableWidths.name) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Text(
-                        stock.name,
+                        text = stock.name,
                         color = if (stock.isHolding) HoldingWatchPurple else MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.SemiBold,
+                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        stock.marketValue?.let { money(it) } ?: "--",
+                        text = "${stock.symbol} · ${stock.market.displayName}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (stock.isHolding) {
+                            WatchStockPill(
+                                text = "持仓",
+                                containerColor = HoldingWatchPurple.copy(alpha = 0.12f),
+                                contentColor = HoldingWatchPurple
+                            )
+                        }
+                        if (stock.isWatched) {
+                            WatchStockPill(
+                                text = "关注",
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
                 }
-                if (stock.isWatched) {
-                    IconButton(onClick = { onDelete(stock.symbol) }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "删除")
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    WatchStockPill(
+                        text = "${stock.alertCount} 预警",
+                        containerColor = alertContainer,
+                        contentColor = alertContent
+                    )
+                    if (stock.isWatched) {
+                        Box {
+                            IconButton(onClick = { menuExpanded = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "更多操作")
+                            }
+                            DropdownMenu(
+                                expanded = menuExpanded,
+                                onDismissRequest = { menuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("删除关注") },
+                                    leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onDelete(stock.symbol)
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
             }
+
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("现价", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        text = stock.latestPrice?.let { money(it) } ?: "--",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        text = "日涨跌 ${stock.dayChangePercent?.let { signedPercent(it) } ?: "--"}",
+                        color = dayChangeColor,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(primaryLabel, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        text = primaryValue,
+                        color = primaryColor,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+
+            WatchStockMetricGrid(
+                stock = stock,
+                dayProfitColor = dayProfitColor,
+                watchChangeColor = watchChangeColor
+            )
         }
-        WatchTableCell(stock.totalProfit?.let { signedMoney(it) } ?: "--", WatchTableWidths.money, color = profitColor)
-        WatchTableCell(
-            "${stock.costPrice?.let { money(it) } ?: "--"}\n${stock.latestPrice?.let { money(it) } ?: "--"}",
-            WatchTableWidths.money
-        )
-        WatchTableCell(stock.quantity?.let { formatPlainNumber(it) } ?: "--", WatchTableWidths.quantity)
-        WatchTableCell(stock.dayProfit?.let { signedMoney(it) } ?: "--", WatchTableWidths.money, color = dayProfitColor)
-        WatchTableCell(stock.watchChangePercent?.let { signedPercent(it) } ?: "--", WatchTableWidths.percent, color = watchChangeColor)
-        WatchTableCell(stock.alertCount.toString(), WatchTableWidths.count)
-        WatchTableCell(stock.industry.ifBlank { "--" }, WatchTableWidths.industry)
     }
 }
 
 @Composable
-private fun WatchTableCell(
-    text: String,
-    width: Dp,
-    isHeader: Boolean = false,
-    color: Color? = null
+private fun WatchStockMetricGrid(
+    stock: WatchListItem,
+    dayProfitColor: Color,
+    watchChangeColor: Color
 ) {
-    WatchTableCell(width, isHeader) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WatchStockMetric("市值", stock.marketValue?.let { money(it) } ?: "--", Modifier.weight(1f))
+            WatchStockMetric(
+                "成本/现价",
+                "${stock.costPrice?.let { money(it) } ?: "--"}\n${stock.latestPrice?.let { money(it) } ?: "--"}",
+                Modifier.weight(1f)
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WatchStockMetric("持仓数量", stock.quantity?.let { formatPlainNumber(it) } ?: "--", Modifier.weight(1f))
+            WatchStockMetric(
+                "当日盈亏",
+                stock.dayProfit?.let { signedMoney(it) } ?: "--",
+                Modifier.weight(1f),
+                valueColor = dayProfitColor
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WatchStockMetric(
+                "关注后涨幅",
+                stock.watchChangePercent?.let { signedPercent(it) } ?: "--",
+                Modifier.weight(1f),
+                valueColor = watchChangeColor
+            )
+            WatchStockMetric("行业", stock.industry.ifBlank { "--" }, Modifier.weight(1f), valueMaxLines = 2)
+        }
+    }
+}
+
+@Composable
+
+private fun WatchStockMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface,
+    valueMaxLines: Int = 2
+) {
+    Column(
+        modifier = modifier
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
         Text(
-            text = text,
-            color = if (isHeader) MaterialTheme.colorScheme.onSurfaceVariant else color ?: MaterialTheme.colorScheme.onSurface,
-            fontWeight = if (isHeader) FontWeight.SemiBold else FontWeight.Normal,
-            maxLines = 2,
+            text = label,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            style = MaterialTheme.typography.labelSmall
+        )
+        Text(
+            text = value,
+            color = valueColor,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = valueMaxLines,
             overflow = TextOverflow.Ellipsis,
             style = MaterialTheme.typography.bodyMedium
         )
@@ -1511,19 +1631,20 @@ private fun WatchTableCell(
 }
 
 @Composable
-private fun WatchTableCell(
-    width: Dp,
-    isHeader: Boolean = false,
-    content: @Composable ColumnScope.() -> Unit
+private fun WatchStockPill(
+    text: String,
+    containerColor: Color,
+    contentColor: Color
 ) {
-    Column(
+    Text(
+        text = text,
+        color = contentColor,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        style = MaterialTheme.typography.labelSmall,
         modifier = Modifier
-            .width(width)
-            .defaultMinSize(minHeight = if (isHeader) 44.dp else 64.dp)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            .padding(8.dp),
-        verticalArrangement = Arrangement.Center,
-        content = content
+            .background(containerColor, RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp)
     )
 }
 
@@ -1535,15 +1656,6 @@ private fun Double?.changeColor(): Color {
         this < 0 -> ChinaFallGreen
         else -> MaterialTheme.colorScheme.onSurface
     }
-}
-
-private object WatchTableWidths {
-    val name = 132.dp
-    val money = 112.dp
-    val quantity = 96.dp
-    val percent = 112.dp
-    val count = 84.dp
-    val industry = 112.dp
 }
 
 @Composable

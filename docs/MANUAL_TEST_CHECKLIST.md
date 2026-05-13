@@ -18,8 +18,12 @@
 
 ## 内置个人数据
 
-- 将 `docs/personal_portfolio.example.json` 复制为 `app/src/main/assets/personal_portfolio.local.json` 后安装，空库首次启动会导入持仓、关注股和监控配置。
-- 本地数据库已有持仓或关注股时，重启 App 不会用 JSON 覆盖已有数据。
+- 将 `docs/personal_portfolio.example.json` 复制为 `app/src/main/assets/personal_portfolio.local.json` 后安装，空库首次启动会导入持仓和关注股。
+- 数据库已有持仓或关注股时，在 JSON 新增一个不存在的关注股票，重启后会补充到关注列表。
+- 持仓 JSON 只填写股票代码、持仓数量、成本价和备注时，导入后能通过行情补全股票名称、市场和现价。
+- 关注 JSON 只填写股票代码、关注原因和行业时，导入后能通过行情补全股票名称和市场。
+- JSON 包含 `monitorConfigs` 时会导入监控配置；不填写时使用默认监控规则。
+- 本地数据库已有相同股票时，重启 App 不会用 JSON 覆盖已有数据。
 - JSON 缺少可选字段时使用默认值或代码推断。
 - JSON 格式错误时不清库，首页显示导入失败提示。
 

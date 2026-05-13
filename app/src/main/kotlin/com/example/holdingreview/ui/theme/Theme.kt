@@ -22,7 +22,7 @@ private val LightColors = lightColorScheme(
 )
 
 /**
- * 为可组合内容应用持仓复盘的 Material 主题。
+ * 为可组合内容应用股票复盘的 Material 主题。
  */
 @Composable
 fun HoldingReviewTheme(content: @Composable () -> Unit) {

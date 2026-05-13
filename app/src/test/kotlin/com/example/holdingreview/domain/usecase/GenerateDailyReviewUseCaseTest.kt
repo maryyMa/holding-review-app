@@ -28,7 +28,7 @@ class GenerateDailyReviewUseCaseTest {
 
         val draft = useCase(holdings, signals)
 
-        assertTrue(draft.summary.contains("持仓复盘"))
+        assertTrue(draft.summary.contains("股票复盘"))
         assertTrue(draft.summary.contains("主要贡献"))
         assertTrue(draft.aiPrompt.contains("投资复盘助手"))
     }

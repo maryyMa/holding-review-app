@@ -44,6 +44,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.text.Collator
+import java.util.Locale
 import javax.inject.Inject
 
 /**
@@ -441,7 +443,7 @@ class WatchListViewModel @Inject constructor(
                 isWatched = true
             )
         }
-        WatchListUiState(holdingItems + watchOnlyItems, refreshing, text)
+        WatchListUiState((holdingItems + watchOnlyItems).sortedByStockName(), refreshing, text)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WatchListUiState())
 
     /**
@@ -494,12 +496,16 @@ data class WatchEditUiState(
     val quote: QuoteSnapshot? = null,
     /** 自动查询进行中时为 true。 */
     val isLookingUp: Boolean = false,
+    /** 保存关注股票进行中时为 true。 */
+    val isSaving: Boolean = false,
     /** 查询失败时展示的错误信息。 */
     val lookupError: String? = null,
     /** 查询失败后是否允许手动填写股票名称。 */
     val allowManualNameInput: Boolean = false,
     /** 查询成功后按代码和名称推断出的行业。 */
-    val suggestedIndustry: String? = null
+    val suggestedIndustry: String? = null,
+    /** 保存或校验失败时展示的消息。 */
+    val message: String? = null
 )
 
 /**
@@ -532,19 +538,25 @@ class WatchEditViewModel @Inject constructor(
 ) : ViewModel() {
     /** 内部行情查询状态。 */
     private val lookupState = MutableStateFlow(WatchQuoteLookupState())
+    /** 保存进行中状态。 */
+    private val isSaving = MutableStateFlow(false)
+    /** 页面提示消息。 */
+    private val message = MutableStateFlow<String?>(null)
     /** 最近一次触发查询的股票代码，用于避免重复请求。 */
     private var lastLookupSymbol: String? = null
     /** 当前正在执行的查询任务。 */
     private var lookupJob: Job? = null
 
     /** 添加关注页面消费的屏幕状态。 */
-    val uiState: StateFlow<WatchEditUiState> = lookupState.map { lookup ->
+    val uiState: StateFlow<WatchEditUiState> = combine(lookupState, isSaving, message) { lookup, saving, text ->
         WatchEditUiState(
             quote = lookup.quote,
             isLookingUp = lookup.isLookingUp,
+            isSaving = saving,
             lookupError = lookup.lookupError,
             allowManualNameInput = lookup.allowManualNameInput,
-            suggestedIndustry = lookup.suggestedIndustry
+            suggestedIndustry = lookup.suggestedIndustry,
+            message = text
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), WatchEditUiState())
 
@@ -590,14 +602,20 @@ class WatchEditViewModel @Inject constructor(
     /**
      * 校验表单文本并保存关注股票。
      */
-    fun save(symbol: String, name: String, reason: String, industry: String): Boolean {
+    fun save(symbol: String, name: String, reason: String, industry: String, onSaved: () -> Unit) {
         val normalizedSymbol = symbol.trim()
         val lookup = lookupState.value
-        if (normalizedSymbol.length != 6 || lookup.isLookingUp) return false
+        if (normalizedSymbol.length != 6 || lookup.isLookingUp || isSaving.value) {
+            message.value = "请检查股票代码和股票名称"
+            return
+        }
 
         val quote = lookup.quote?.takeIf { it.symbol == normalizedSymbol }
         val resolvedName = quote?.name ?: name.trim()
-        if (resolvedName.isBlank()) return false
+        if (resolvedName.isBlank()) {
+            message.value = "请填写股票名称"
+            return
+        }
 
         val input = WatchStockInput(
             symbol = normalizedSymbol,
@@ -607,9 +625,24 @@ class WatchEditViewModel @Inject constructor(
             tags = inferIndustry(normalizedSymbol, resolvedName, industry)
         )
         viewModelScope.launch {
-            repository.upsertWatchStock(input)
+            isSaving.value = true
+            runCatching {
+                repository.upsertWatchStock(input)
+            }.fold(
+                onSuccess = {
+                    isSaving.value = false
+                    onSaved()
+                },
+                onFailure = {
+                    isSaving.value = false
+                    message.value = "保存失败：${it.message ?: "请稍后重试"}"
+                }
+            )
         }
-        return true
+    }
+
+    fun clearMessage() {
+        message.value = null
     }
 }
 
@@ -923,6 +956,14 @@ private fun WatchStock.watchChangePercentFrom(latestPrice: Double?): Double? {
     val baseClose = watchBaseClose?.takeIf { it > 0 } ?: return null
     val latest = latestPrice ?: return null
     return (latest - baseClose) / baseClose * 100
+}
+
+private fun List<WatchListItem>.sortedByStockName(): List<WatchListItem> {
+    val collator = Collator.getInstance(Locale.CHINA)
+    return sortedWith { left, right ->
+        val nameResult = collator.compare(left.name, right.name)
+        if (nameResult != 0) nameResult else left.symbol.compareTo(right.symbol)
+    }
 }
 
 data class OcrDraftForm(

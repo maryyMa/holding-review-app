@@ -282,7 +282,7 @@ class GenerateDailyReviewUseCase @Inject constructor(
         val snapshot = calculatePortfolio(holdings)
         val date = todayText()
         val summary = buildString {
-            append(date).append(" 持仓复盘\n\n")
+            append(date).append(" 股票复盘\n\n")
             append("今日持仓 ").append(snapshot.holdingCount).append(" 只，")
             append("总市值 ").append(money(snapshot.marketValue)).append("。")
             append("当日盈亏 ").append(signedMoney(snapshot.dayProfit))

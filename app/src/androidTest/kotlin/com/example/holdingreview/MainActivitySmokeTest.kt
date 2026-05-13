@@ -19,6 +19,6 @@ class MainActivitySmokeTest {
      */
     @Test
     fun homeScreenShowsAppTitle() {
-        composeRule.onNodeWithText("持仓复盘").assertIsDisplayed()
+        composeRule.onNodeWithText("股票复盘").assertIsDisplayed()
     }
 }

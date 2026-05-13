@@ -30,7 +30,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -182,6 +181,72 @@ class DefaultPortfolioRepositoryLookupQuoteTest {
         val holdingDao = FakeHoldingDao()
         val watchStockDao = FakeWatchStockDao()
         val monitorConfigDao = FakeMonitorConfigDao()
+        val quoteDao = FakeQuoteSnapshotDao()
+        val repository = DefaultPortfolioRepository(
+            holdingDao = holdingDao,
+            watchStockDao = watchStockDao,
+            quoteSnapshotDao = quoteDao,
+            dailyReviewDao = FakeDailyReviewDao(),
+            monitorConfigDao = monitorConfigDao,
+            tradeOperationDao = FakeTradeOperationDao(),
+            personalSeedDataSource = FakePersonalSeedSource(personalSeed()),
+            quoteRemoteDataSource = FakeQuoteRemoteDataSource(
+                Result.success(
+                    listOf(
+                        RemoteQuote(
+                            symbol = "600519",
+                            name = "贵州茅台",
+                            market = Market.SH,
+                            latestPrice = 1586.3,
+                            previousClose = null,
+                            changePercent = 1.0,
+                            volume = null,
+                            turnoverAmount = null,
+                            turnoverRate = null,
+                            amplitude = null
+                        ),
+                        RemoteQuote(
+                            symbol = "688981",
+                            name = "中芯国际",
+                            market = Market.SH,
+                            latestPrice = 35.0,
+                            previousClose = null,
+                            changePercent = 1.0,
+                            volume = null,
+                            turnoverAmount = null,
+                            turnoverRate = null,
+                            amplitude = null
+                        )
+                    )
+                )
+            ),
+            kLineCacheDao = FakeKLineCacheDao(),
+            kLineRemoteDataSource = FakeKLineRemoteDataSource()
+        )
+
+        val result = repository.seedIfEmpty()
+
+        assertTrue(result.isSuccess)
+        assertTrue(result.getOrThrow())
+        assertEquals("600519", holdingDao.items.single().symbol)
+        assertEquals("贵州茅台", holdingDao.items.single().name)
+        assertEquals(1586.3, holdingDao.items.single().manualCurrentPrice, 0.001)
+        assertEquals("688981", watchStockDao.items.single().symbol)
+        assertEquals("中芯国际", watchStockDao.items.single().name)
+        assertEquals(2, quoteDao.upserted.size)
+        assertEquals("600519", monitorConfigDao.items.single().symbol)
+        assertEquals(8.0, monitorConfigDao.items.single().costProfitPercent, 0.001)
+    }
+
+    @Test
+    fun `seed imports missing personal symbols without overriding existing local portfolio`() = runTest {
+        val holdingDao = FakeHoldingDao(
+            mutableListOf(
+                HoldingEntity("holding-1", "600519", "本地名称", Market.SH.name, 50.0, 10.0, 10.0, "本地备注", 0L)
+            )
+        )
+        val watchStockDao = FakeWatchStockDao()
+        val monitorConfigDao = FakeMonitorConfigDao()
         val repository = DefaultPortfolioRepository(
             holdingDao = holdingDao,
             watchStockDao = watchStockDao,
@@ -199,37 +264,11 @@ class DefaultPortfolioRepositoryLookupQuoteTest {
 
         assertTrue(result.isSuccess)
         assertTrue(result.getOrThrow())
-        assertEquals("600519", holdingDao.items.single().symbol)
-        assertEquals("688981", watchStockDao.items.single().symbol)
-        assertEquals("600519", monitorConfigDao.items.single().symbol)
-        assertEquals(8.0, monitorConfigDao.items.single().costProfitPercent, 0.001)
-    }
-
-    @Test
-    fun `seed does not override existing local portfolio`() = runTest {
-        val holdingDao = FakeHoldingDao(
-            mutableListOf(
-                HoldingEntity("holding-1", "000001", "平安银行", Market.SZ.name, 100.0, 10.0, 10.0, "", 0L)
-            )
-        )
-        val repository = DefaultPortfolioRepository(
-            holdingDao = holdingDao,
-            watchStockDao = FakeWatchStockDao(),
-            quoteSnapshotDao = FakeQuoteSnapshotDao(),
-            dailyReviewDao = FakeDailyReviewDao(),
-            monitorConfigDao = FakeMonitorConfigDao(),
-            tradeOperationDao = FakeTradeOperationDao(),
-            personalSeedDataSource = FakePersonalSeedSource(personalSeed()),
-            quoteRemoteDataSource = FakeQuoteRemoteDataSource(Result.success(emptyList())),
-            kLineCacheDao = FakeKLineCacheDao(),
-            kLineRemoteDataSource = FakeKLineRemoteDataSource()
-        )
-
-        val result = repository.seedIfEmpty()
-
-        assertTrue(result.isSuccess)
-        assertFalse(result.getOrThrow())
-        assertEquals(listOf("000001"), holdingDao.items.map { it.symbol })
+        assertEquals(1, holdingDao.items.size)
+        assertEquals("本地名称", holdingDao.items.single().name)
+        assertEquals(50.0, holdingDao.items.single().quantity, 0.001)
+        assertEquals(listOf("688981"), watchStockDao.items.map { it.symbol })
+        assertEquals(listOf("600519"), monitorConfigDao.items.map { it.symbol })
     }
 
     /**
@@ -298,23 +337,16 @@ class DefaultPortfolioRepositoryLookupQuoteTest {
             holdings = listOf(
                 PersonalHoldingSeed(
                     symbol = "600519",
-                    name = "贵州茅台",
-                    market = Market.SH,
                     quantity = 100.0,
                     costPrice = 1560.0,
-                    manualCurrentPrice = 1586.3,
                     note = "核心观察仓"
                 )
             ),
             watchStocks = listOf(
                 PersonalWatchStockSeed(
                     symbol = "688981",
-                    name = "中芯国际",
-                    market = Market.SH,
                     reason = "观察半导体板块异动",
-                    industry = "半导体,科技",
-                    watchBaseClose = null,
-                    watchBaseCloseDate = null
+                    industry = "半导体,科技"
                 )
             ),
             monitorConfigs = listOf(

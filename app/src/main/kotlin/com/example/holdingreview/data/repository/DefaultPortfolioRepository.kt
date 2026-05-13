@@ -133,18 +133,20 @@ class DefaultPortfolioRepository @Inject constructor(
     }
 
     /**
-     * 首次启动应用时优先导入内置个人数据；没有内置数据时写入示例数据。
+     * 每次启动尝试补充内置个人数据里本地缺失的记录；没有内置数据且数据库为空时写入示例数据。
      */
     override suspend fun seedIfEmpty(): Result<Boolean> {
         return runCatching {
-            if (holdingDao.getAllOnce().isNotEmpty() || watchStockDao.getAllOnce().isNotEmpty()) return@runCatching false
             val personalSeed = personalSeedDataSource.load()
             if (personalSeed != null) {
                 importPersonalSeed(personalSeed)
             } else {
+                if (holdingDao.getAllOnce().isNotEmpty() || watchStockDao.getAllOnce().isNotEmpty()) {
+                    return@runCatching false
+                }
                 seedDemoData()
+                true
             }
-            true
         }
     }
 
@@ -165,41 +167,73 @@ class DefaultPortfolioRepository @Inject constructor(
         )
     }
 
-    private suspend fun importPersonalSeed(seed: PersonalPortfolioSeed) {
+    private suspend fun importPersonalSeed(seed: PersonalPortfolioSeed): Boolean {
         val now = System.currentTimeMillis()
+        val existingHoldingSymbols = holdingDao.getAllOnce().map { it.symbol }.toSet()
+        val existingWatchSymbols = watchStockDao.getAllOnce().map { it.symbol }.toSet()
+        val existingConfigSymbols = monitorConfigDao.getAllOnce().map { it.symbol }.toSet()
+        val missingHoldings = seed.holdings
+            .distinctBy { it.symbol }
+            .filterNot { it.symbol in existingHoldingSymbols }
+        val missingWatchStocks = seed.watchStocks
+            .distinctBy { it.symbol }
+            .filterNot { it.symbol in existingWatchSymbols }
+        val missingConfigs = seed.monitorConfigs
+            .distinctBy { it.symbol }
+            .filterNot { it.symbol in existingConfigSymbols }
+
+        if (missingHoldings.isEmpty() && missingWatchStocks.isEmpty() && missingConfigs.isEmpty()) {
+            return false
+        }
+
+        val symbols = (missingHoldings.map { it.symbol } + missingWatchStocks.map { it.symbol })
+            .distinct()
+            .filter { it.length == 6 }
+        val quotes = if (symbols.isEmpty()) {
+            emptyList()
+        } else {
+            quoteRemoteDataSource.fetchQuotes(symbols).getOrDefault(emptyList())
+        }
+        if (quotes.isNotEmpty()) {
+            quoteSnapshotDao.upsertAll(quotes.map { it.toEntity(now) })
+        }
+        val quoteMap = quotes.associateBy { it.symbol }
         holdingDao.upsertAll(
-            seed.holdings.map { holding ->
+            missingHoldings.map { holding ->
+                val quote = quoteMap[holding.symbol]
                 HoldingEntity(
                     id = UUID.randomUUID().toString(),
                     symbol = holding.symbol,
-                    name = holding.name,
-                    market = holding.market.name,
+                    name = quote?.name?.ifBlank { holding.symbol } ?: holding.symbol,
+                    market = quote?.market?.name ?: Market.fromSymbol(holding.symbol).name,
                     quantity = holding.quantity,
                     costPrice = holding.costPrice,
-                    manualCurrentPrice = holding.manualCurrentPrice,
+                    manualCurrentPrice = quote?.latestPrice ?: holding.costPrice,
                     note = holding.note,
                     updatedAtMillis = now
                 )
             }
         )
         watchStockDao.upsertAll(
-            seed.watchStocks.map { watch ->
+            missingWatchStocks.map { watch ->
+                val quote = quoteMap[watch.symbol]
                 WatchStockEntity(
                     symbol = watch.symbol,
-                    name = watch.name,
-                    market = watch.market.name,
+                    name = quote?.name?.ifBlank { watch.symbol } ?: watch.symbol,
+                    market = quote?.market?.name ?: Market.fromSymbol(watch.symbol).name,
                     reason = watch.reason,
                     tags = watch.industry,
                     watchedAtMillis = now,
-                    watchBaseClose = watch.watchBaseClose,
-                    watchBaseCloseDate = watch.watchBaseCloseDate,
+                    watchBaseClose = null,
+                    watchBaseCloseDate = null,
                     updatedAtMillis = now
                 )
             }
         )
-        seed.monitorConfigs.forEach { config ->
+        missingConfigs.forEach { config ->
             monitorConfigDao.upsert(config.toMonitorConfig(now).toEntity(now))
         }
+        return true
     }
 
     /**
